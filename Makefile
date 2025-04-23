@@ -1,6 +1,9 @@
 PROJECT=lide.device
 BUILDDIR=build
 ROM=lide.rom
+
+$(shell git config --global --add safe.directory '*')
+
 VERSION := $(shell git describe --tags --dirty | sed -r 's/^Release-//')
 
 GIT_REF_NAME = $(shell git branch --show-current)
@@ -11,7 +14,7 @@ export BUILD_DATE
 export GIT_REF
 
 CC=m68k-amigaos-gcc
-CFLAGS+=-nostartfiles -nostdlib -mcpu=68000 -Wall -Wno-multichar -Wno-pointer-sign -Wno-attributes  -Wno-unused-value -s -Os -fomit-frame-pointer -DCDBOOT=1 -DNO_RDBLAST=1
+CFLAGS+=-nostartfiles -nostdlib -mcpu=68000 -Wall -Wno-multichar -Wno-pointer-sign -Wno-attributes  -Wno-unused-value -s -Os -fomit-frame-pointer -DNO_RDBLAST=1
 CFLAGS+=-DGIT_REF=$(GIT_REF) -DBUILD_DATE=$(BUILD_DATE)
 LDFLAGS=-lgcc -lc
 AS=m68k-amigaos-as
@@ -63,16 +66,18 @@ all:	$(ROM) \
 		rename/renamelide \
 		lide-N2630-high.rom \
 		lide-N2630-low.rom \
-		AIDE-$(PROJECT)
+		AIDE-$(PROJECT) \
+		SD-$(PROJECT)
 
-OBJ = device.o \
-      ata.o \
-	  atapi.o \
-	  scsi.o \
-	  idetask.o \
-	  lide_alib.o \
-	  mounter.o \
-	  debug.o
+
+OBJ = 	device.o \
+		ata.o\
+		atapi.o\
+		scsi.o \
+		idetask.o \
+		lide_alib.o \
+		mounter.o \
+		debug.o
 
 ASMOBJ = endskip.o
 
@@ -80,13 +85,16 @@ SRCS = $(OBJ:%.o=%.c)
 SRCS += $(ASMOBJ:%.o=%.S)
 
 $(PROJECT): $(SRCS)
-	${CC} -o $@ $(CFLAGS) $(SRCS) $(LDFLAGS)
+	${CC} -o $@ $(CFLAGS) -DCDBOOT=1 $(SRCS) $(LDFLAGS)
 
 $(ROM): $(PROJECT)
 	make -C bootrom
 
 AIDE-$(PROJECT): $(SRCS)
-	${CC} -o $@ $(CFLAGS) -DSIMPLE_IDE=1 $(SRCS) bootblock.S $(LDFLAGS)
+	${CC} -o $@ $(CFLAGS) -DCDBOOT=1 -DSIMPLE_IDE=1 $(SRCS) bootblock.S $(LDFLAGS)
+
+SD-$(PROJECT): $(SRCS)
+	${CC} -o $@ $(CFLAGS) -DSD_DRIVER=1 device.c sd.c scsi.c idetask.c lide_alib.c mounter.c debug.c endskip.S bootblock.S $(LDFLAGS)
 
 lideflash/lideflash:
 	make -C lideflash
@@ -126,9 +134,9 @@ $(BUILDDIR)/$(DISK): $(ROM) lideflash/lideflash rename/renamelide lidetool/lidet
 $(BUILDDIR)/lide-update.lha: lideflash/lideflash $(ROM) rename/renamelide lidetool/lidetool lide.device info/lide.device.info AIDE-lide.device
 	@mkdir -p $(BUILDDIR)
 	cp $^ $(BUILDDIR)
-	cd $(BUILDDIR) && lha -c ../$@ $(notdir $^) 
+	cd $(BUILDDIR) && lha -c ../$@ $(notdir $^)
 
-lha: $(BUILDDIR)/lide-update.lha 
+lha: $(BUILDDIR)/lide-update.lha
 
 lide-N2630-high.rom: $(ROM)
 	srec_cat lide-word.rom -binary -split 2 0 1 -out $@ -binary
@@ -148,6 +156,7 @@ lide-tk-29F040.rom: lide-tk-29F020.rom
 clean:
 	-rm -f $(PROJECT)
 	-rm -f AIDE-$(PROJECT)
+	-rm -f SD-$(PROJECT)
 	make -C bootrom clean
 	make -C lideflash clean
 	make -C lidetool clean
