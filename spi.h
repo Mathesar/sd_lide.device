@@ -32,27 +32,39 @@
 
 #define SSPI_RESOURCE_NAME	"sspi"
 
+//sspi resource
 struct sspi_resource_TYPE
 {
 	struct Node	node;
-	UBYTE   pad1;
-   UBYTE   pad2;
-   UWORD   pad3;
-   UWORD   pad4;
-   UWORD   Version;
-   UWORD   Revision;
-   struct SignalSemaphore semaphore;
-	char name[sizeof(SSPI_RESOURCE_NAME)];
+	UBYTE                       pad1;
+    UBYTE                       pad2;
+    UWORD                       pad3;
+    UWORD                       pad4;
+    UWORD                       Version;
+    UWORD                       Revision;
+    struct SignalSemaphore      semaphore;
+	char                        name[sizeof(SSPI_RESOURCE_NAME)];
 };
 
-int spi_initialize(unsigned char channel, struct ExecBase *SysBase);
-void spi_shutdown(struct ExecBase *SysBase);
-void spi_set_speed(long speed);
-void spi_obtain(struct ExecBase *SysBase);
-void spi_release(struct ExecBase *SysBase);
-void spi_select();
+//spi channel structure
+struct spi_TYPE
+{
+    struct sspi_resource_TYPE   *sspi;      // pointer to the SSPI resource
+    struct ExecBase             *SysBase;   // pointer to Exec/SysBase
+    UBYTE                       speed;      // bus speed
+    UBYTE                       bus_taken;  // bus status
+    UBYTE                       channel;    // SPI channel (chip_select) to use;
+};
+
+//functions
+void spi_obtain(struct spi_TYPE *spi);
+void spi_release(struct spi_TYPE *spi);
+void spi_select(struct spi_TYPE *spi);
 void spi_deselect();
-void spi_read(UBYTE *buf asm("a0"), UWORD size asm("d0"));
-void spi_write(const UBYTE *buf asm("a0"), UWORD size asm("d0"));
+void spi_set_speed(struct spi_TYPE *spi, UBYTE speed);
+void spi_read(struct spi_TYPE *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"));
+void spi_write(struct spi_TYPE *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"));
+int spi_initialize(struct spi_TYPE *spi, unsigned char channel, struct ExecBase *SysBase);
+void spi_shutdown(struct spi_TYPE *spi);
 
 #endif
