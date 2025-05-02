@@ -47,24 +47,24 @@ struct sspi_resource_TYPE
 };
 
 //spi channel structure
-struct spi_TYPE
+typedef struct
 {
     struct sspi_resource_TYPE   *sspi;      // pointer to the SSPI resource
     struct ExecBase             *SysBase;   // pointer to Exec/SysBase
     UBYTE                       speed;      // bus speed
     UBYTE                       bus_taken;  // bus status
     UBYTE                       channel;    // SPI channel (chip_select) to use;
-};
+}spi_t;
 
 //functions
-void spi_obtain(struct spi_TYPE *spi);
-void spi_release(struct spi_TYPE *spi);
-void spi_select(struct spi_TYPE *spi);
+void spi_obtain(spi_t *spi);
+void spi_release(spi_t *spi);
+void spi_select(spi_t *spi);
 void spi_deselect();
-void spi_set_speed(struct spi_TYPE *spi, UBYTE speed);
-void spi_read(struct spi_TYPE *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"));
-void spi_write(struct spi_TYPE *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"));
-int spi_initialize(struct spi_TYPE *spi, unsigned char channel, struct ExecBase *SysBase);
-void spi_shutdown(struct spi_TYPE *spi);
+void spi_set_speed(spi_t *spi, UBYTE speed);
+void spi_read(spi_t *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"));
+void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"));
+int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase);
+void spi_shutdown(spi_t *spi);
 
 #endif

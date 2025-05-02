@@ -17,7 +17,6 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
 #include "spi.h"
 #include <proto/exec.h>
 #include <string.h>
@@ -28,7 +27,7 @@ extern void spi_read_fast(UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *por
 extern void spi_write_fast(const UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
 
 //obtain the bus
-void spi_obtain(struct spi_TYPE *spi)
+void spi_obtain(spi_t *spi)
 {
 	struct ExecBase *SysBase = spi->SysBase;
 
@@ -40,7 +39,7 @@ void spi_obtain(struct spi_TYPE *spi)
 }
 
 //release the bus
-void spi_release(struct spi_TYPE *spi)
+void spi_release(spi_t *spi)
 {
     struct ExecBase *SysBase = spi->SysBase;
 
@@ -52,7 +51,7 @@ void spi_release(struct spi_TYPE *spi)
 }
 
 //select the channel (assert chip_select)
-void spi_select(struct spi_TYPE *spi)
+void spi_select(spi_t *spi)
 {
 	//assert chipselect
 	spi_chip_select(spi->channel, (UBYTE *)(SSPI_BASE_ADDRESS));
@@ -66,7 +65,7 @@ void spi_deselect()
 }
 
 //sets the speed of the SPI bus
-void spi_set_speed(struct spi_TYPE *spi, UBYTE speed)
+void spi_set_speed(spi_t *spi, UBYTE speed)
 {
 	spi->speed = speed;
 }
@@ -103,7 +102,7 @@ static void spi_read_slow(UBYTE *buf asm("a0"), UWORD size asm("d0"))
 }
 
 //read <size> bytes from the SPI bus into <buf>
-void spi_read(struct spi_TYPE *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"))
+void spi_read(spi_t *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"))
 {
 	if (spi->speed == SPI_SPEED_FAST)
 		spi_read_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
@@ -112,7 +111,7 @@ void spi_read(struct spi_TYPE *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size a
 }
 
 //write <size> bytes from <buf> to the SPI bus
-void spi_write(struct spi_TYPE *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"))
+void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"))
 {
 	if (spi->speed == SPI_SPEED_FAST)
 		spi_write_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
@@ -121,7 +120,7 @@ void spi_write(struct spi_TYPE *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD
 }
 
 //initialize SPI hardware, <channel> sets chipselect to use
-int spi_initialize(struct spi_TYPE *spi, unsigned char channel, struct ExecBase *SysBase)
+int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 {
 	//assert channel
 	if(channel!=SPI_CHANNEL_1 && channel!=SPI_CHANNEL_2)
@@ -170,7 +169,7 @@ int spi_initialize(struct spi_TYPE *spi, unsigned char channel, struct ExecBase 
 }
 
 //shutdown SPI bus
-void spi_shutdown(struct spi_TYPE *spi)
+void spi_shutdown(spi_t *spi)
 {
 	//make sure we release the bus
 	spi_deselect();
