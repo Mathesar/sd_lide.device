@@ -94,7 +94,7 @@ AIDE-$(PROJECT): $(SRCS)
 	${CC} -o $@ $(CFLAGS) -DCDBOOT=1 -DSIMPLE_IDE=1 $(SRCS) bootblock.S $(LDFLAGS)
 
 SD-$(PROJECT): $(SRCS)
-	${CC} -o $@ $(CFLAGS) -DSD_DRIVER=1 device.c sd.c scsi.c idetask.c lide_alib.c mounter.c debug.c spi.c spi_low.S endskip.S bootblock.S $(LDFLAGS)
+	${CC} -o $@ $(CFLAGS) -DSD_DRIVER=1 device.c sd.c scsi.c idetask.c lide_alib.c mounter.c debug.c timer.c spi.c spi_low.S endskip.S bootblock.S $(LDFLAGS)
 
 lideflash/lideflash:
 	make -C lideflash

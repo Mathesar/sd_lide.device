@@ -25,6 +25,8 @@ enum xfer {
     longword_move
 };
 
+#ifndef SD_DRIVER
+
 /**
  * Drive struct
  *
@@ -80,6 +82,45 @@ struct IDEUnit {
     UBYTE multipleCount;
 };
 
+#else
+
+#include "sd_types.h"
+
+struct IDEUnit {
+    struct MinNode mn_Node;
+    struct Unit io_unit;
+    struct ConfigDev *cd;
+    struct ExecBase *SysBase;
+    struct IDETask *itask;
+    sd_card_info_t sd_card_info;    // SD card context
+    BYTE  (*write_taskfile)(struct IDEUnit *, UBYTE, ULONG, UBYTE, UBYTE);
+    volatile UBYTE *shadowDevHead;
+    volatile void  *changeInt;
+    volatile bool  deferTUR;
+    UBYTE unitNum;
+    UBYTE channel;
+    UBYTE deviceType;
+    UBYTE last_error[6];
+    bool  primary;
+    bool  present;
+    bool  atapi;
+    bool  mediumPresent;
+    bool  mediumPresentPrev;
+    bool  xferMultiple;
+    UWORD openCount;
+    UWORD changeCount;
+    UWORD heads;
+    UWORD sectorsPerTrack;
+    UWORD blockSize;
+    UWORD blockShift;
+    ULONG cylinders;
+    ULONG logicalSectors;
+    struct MinList changeInts;
+    UBYTE multipleCount;
+};
+
+#endif // SD_DRIVER
+
 struct DeviceBase {
     struct Library         lib;
     struct ExecBase        *SysBase;
@@ -93,7 +134,7 @@ struct DeviceBase {
     struct MinList         units;
     struct SignalSemaphore ulSem;
     struct MinList         ideTasks;
-    volatile bool          hasRemovables; // modified by IDETask(s), Start the diskChange task? 
+    volatile bool          hasRemovables; // modified by IDETask(s), Start the diskChange task?
 };
 
 struct IDETask {

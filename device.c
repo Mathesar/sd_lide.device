@@ -75,7 +75,7 @@ char * set_dev_name(struct DeviceBase *dev) {
                 if (devName == NULL) return NULL;
                 strncpy(devName + 4,device_name,sizeof(device_name));
             }
-            
+
             switch (i) {
                 case 0:
                     *(ULONG *)devName = device_prefix[0];
@@ -102,7 +102,7 @@ char * set_dev_name(struct DeviceBase *dev) {
  * CreateFakeConfigDev
  * Create fake ConfigDev and DiagArea to support autoboot without requiring real autoconfig device.
  * Adapted from mounter.c by Toni Wilen
- * 
+ *
  * @param SysBase Pointer to SysBase
  * @param ExpansionBase Pointer to ExpansionBase
  * @returns Pointer to a ConfigDev struct
@@ -262,6 +262,7 @@ static void Cleanup(struct DeviceBase *dev) {
  * @returns number of channels
 */
 static BYTE detectChannels(struct ConfigDev *cd) {
+#ifndef SD_DRIVER
     if ((cd->cd_Rom.er_Manufacturer == OAHR_MANUF_ID) && (cd->cd_Rom.er_Product == RIPPLE_PROD_ID))
         return 2;
 
@@ -310,9 +311,8 @@ static BYTE detectChannels(struct ConfigDev *cd) {
             return 2;
         }
     }
-
+#endif
     return 1;
-
 }
 
 /**
