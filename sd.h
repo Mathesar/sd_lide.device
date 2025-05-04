@@ -3,23 +3,15 @@
 
 #include <stdbool.h>
 #include "device.h"
+#include "sd_types.h"
+#include "spi.h"
 #include <exec/types.h>
-
-#define MAX_TRANSFER_SECTORS 256 // Max amount of sectors to transfer per read/write command
-#if MAX_TRANSFER_SECTORS > 256
-#error "MAX_TRANSFER_SECTORS cannot be larger than 256"
-#endif
 
 // SD interface doesn't support autoconfig
 #define NO_AUTOCONFIG
 
-#define BOARD_BASE                  0xEF0000
-#define CHANNEL_0                   0x1000
-#define CHANNEL_1                   0x2000
-
-#define ata_reg_devHead             1
-#define ata_reg_status              2
-#define ata_reg_altStatus           3
+//keep device.c happy, it needs an address to populate a fake ConfigDev
+#define BOARD_BASE                  SSPI_BASE_ADDRESS
 
 #define ata_identify_serial         10
 #define ata_identify_fw_rev         23
