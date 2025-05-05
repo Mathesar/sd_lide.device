@@ -33,13 +33,12 @@
 #include <proto/expansion.h>
 #include <exec/errors.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "debug.h"
 #include "device.h"
 #include "sd.h"
 #include "timer.h"
-//#include "scsi.h"
-#include "string.h"
 #include "wait.h"
 #include "lide_alib.h"
 
@@ -398,7 +397,7 @@ void sd_compute_chs_geometry(struct IDEUnit *unit)
 /**
  * ata_init_unit
  *
- * Initialize a unit, check if it is there and responding
+ * Initialize an SD card, check if it is there and responding
  * @param unit Pointer to an IDEUnit struct
  * @returns false on error
 */
@@ -565,10 +564,163 @@ bool ata_init_unit(struct IDEUnit *unit)
     return true;
 }
 
-
+/**
+ * ata_identify
+ *
+ * Fake the results of an ATA identify command and place it in the buffer
+ * @param unit Pointer to an IDEUnit struct
+ * @param buffer Pointer to the destination buffer
+ * @return false on error
+*/
 bool ata_identify(struct IDEUnit *unit, UWORD *buffer)
 {
+    sd_card_info_t *ci = &unit->sd_card_info;
 
+    //if no card inserted return false
+    if (ci->type == sdCardType_None)
+        return false;
+
+    //clear buffer
+    memset(buffer, 0, SD_SECTOR_SIZE);
+
+    //firmware revision
+    buffer[ata_identify_fw_rev  ] = 0x30+((ci->cid.product_rev>>4)&0x0f);
+    buffer[ata_identify_fw_rev+1] = '.';
+    buffer[ata_identify_fw_rev+2] = 0x30+(ci->cid.product_rev&0x0f);
+
+    //model
+    memcpy(&buffer[ata_identify_model], ci->cid.product_name, 5);
+    buffer[ata_identify_model+5] = '/';
+    buffer[ata_identify_model+6] = ci->cid.app_id[0];
+    buffer[ata_identify_model+7] = ci->cid.app_id[1];
+
+    return true;
+}
+
+/**
+ * ata_read
+ *
+ * Read blocks from the SD card
+ * @param buffer destination buffer
+ * @param lba LBA Address
+ * @param count Number of blocks to transfer
+ * @param unit Pointer to the unit structure
+ * @returns error
+*/
+BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
+{
+    sd_card_info_t *ci = &unit->sd_card_info;
+    spi_t *spi = &unit->sd_card_info.spi;
+    int err = 0;
+
+    if (ci->type == sdCardType_None) {
+        Warn("No card\n");
+        return IOERR_OPENFAIL;
+    }
+    if (ci->type != sdCardType_SDHC) {
+        /* Convert lba to byte addressing (x512) */
+        lba <<= 9;
+    }
+
+    if (count == 1) {
+        /* Read single sector */
+        if (sd_send_cmd(spi, CMD17, lba) == 0) {
+            err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
+        } else {
+            err = sdError_BadResponse;
+        }
+    } else {
+        /* Read multiple sectors */
+        if (sd_send_cmd(spi, CMD18, lba) == 0) {
+            do {
+                err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
+                if (err < 0) {
+                    break;
+                }
+                buffer += SD_SECTOR_SIZE;
+            } while (--count);
+
+            /* Send CMD12 stop transmission */
+            if (err == 0) {
+                err = sd_send_cmd(spi, CMD12, 0);
+            }
+        } else {
+            err = sdError_BadResponse;
+        }
+    }
+
+    sd_deselect(spi);
+
+    //return IOERR_ABORTED id error occurred
+    if(err != sdError_OK)
+        return IOERR_ABORTED;
+    else
+        return 0;
+}
+
+/**
+ * ata_write
+ *
+ * Write blocks to the SD card
+ * @param buffer source buffer
+ * @param lba LBA Address
+ * @param count Number of blocks to transfer
+ * @param unit Pointer to the unit structure
+ * @returns error
+*/
+BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
+{
+    sd_card_info_t *ci = &unit->sd_card_info;
+    spi_t *spi = &unit->sd_card_info.spi;
+    int err = 0;
+
+    if (ci->type == sdCardType_None) {
+        Warn("No card\n");
+        return IOERR_OPENFAIL;
+    }
+    if (ci->type != sdCardType_SDHC) {
+        /* Convert lba to byte addressing (x512) */
+        lba <<= 9;
+    }
+
+    if (count == 1) {
+        /* Write single sector */
+        if (sd_send_cmd(spi, CMD24, lba) == 0) {
+            err = sd_write_block(spi, buffer, 0xfe);
+        } else {
+            err = sdError_BadResponse;
+        }
+    } else {
+        if (ci->type == sdCardType_SD1_x || ci->type == sdCardType_SD2_0 || ci->type == sdCardType_SDHC) {
+            /* Pre-defined sector count */
+            sd_send_cmd(spi, ACMD23, count);
+        }
+        /* Write multiple sectors */
+        if (sd_send_cmd(spi, CMD25, lba) == 0) {
+            do {
+                err = sd_write_block(spi, buffer, 0xfc);
+                if (err < 0) {
+                    break;
+                }
+                buffer += SD_SECTOR_SIZE;
+            } while (--count);
+
+            /* Send STOP_TRAN */
+            if (err == 0) {
+                err = sd_write_block(spi, 0, 0xfd);
+            }
+        } else {
+            err = sdError_BadResponse;
+        }
+    }
+
+    sd_deselect(spi);
+
+    //return IOERR_ABORTED id error occurred
+    if(err != sdError_OK)
+        return IOERR_ABORTED;
+    else
+        return 0;
 }
 
 void ata_set_xfer(struct IDEUnit *unit, enum xfer method)
@@ -576,27 +728,15 @@ void ata_set_xfer(struct IDEUnit *unit, enum xfer method)
 
 }
 
-BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
-{
-
-}
-
-BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
-{
-
-}
-
 BYTE ata_set_pio(struct IDEUnit *unit, UBYTE pio)
 {
-
+    return IOERR_NOCMD;
 }
 
 BYTE scsi_ata_passthrough( struct IDEUnit *unit, struct SCSICmd *cmd)
 {
-
+    return IOERR_NOCMD;
 }
-
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Dummy ATAPI functions
