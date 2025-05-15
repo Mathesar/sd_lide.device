@@ -81,11 +81,11 @@ static int sd_parse_csd(sd_card_info_t *ci, const uint32_t *bits)
     sd_card_csd_t *csd = &ci->csd;
     memset(csd, 0, sizeof(sd_card_csd_t));
 
-    Trace("CSD: %08X %08X %08X %08X\n",
-            (unsigned int)bits[0],
-            (unsigned int)bits[1],
-            (unsigned int)bits[2],
-            (unsigned int)bits[3]);
+    Trace("CSD: %08lX %08lX %08lX %08lX\n",
+            (unsigned long)bits[0],
+            (unsigned long)bits[1],
+            (unsigned long)bits[2],
+            (unsigned long)bits[3]);
 
     csd->csd_structure = (bits[0] >> 30) & 0x2;
     csd->taac = (bits[0] >> 16) & 0xff;
@@ -141,7 +141,7 @@ static int sd_parse_csd(sd_card_info_t *ci, const uint32_t *bits)
     }
 
     ci->block_size = csd->read_block_len;
-    Info("block size = %u bytes\n",1 << ci->block_size);
+    Info("block size = %lu bytes\n",(unsigned long)(1 << ci->block_size));
 
     /* FIXME: Check CRC */
 
@@ -154,11 +154,11 @@ static int sd_parse_cid(sd_card_info_t *ci, const uint32_t *bits)
     sd_card_cid_t *cid = &ci->cid;
     memset(cid, 0, sizeof(sd_card_cid_t));
 
-    Trace("CID: %08X %08X %08X %08X\n",
-            (unsigned int)bits[0],
-            (unsigned int)bits[1],
-            (unsigned int)bits[2],
-            (unsigned int)bits[3]);
+    Trace("CID: %08lX %08lX %08lX %08lX\n",
+            (unsigned long)bits[0],
+            (unsigned long)bits[1],
+            (unsigned long)bits[2],
+            (unsigned long)bits[3]);
 
     cid->manufacturer_id = (bits[0] >> 24) & 0xff;
     cid->app_id[0] = (bits[0] >> 16) & 0xff;
@@ -174,14 +174,14 @@ static int sd_parse_cid(sd_card_info_t *ci, const uint32_t *bits)
     cid->mfg_date = (bits[3] >> 8) & 0xfff;
     cid->crc = (bits[3] >> 1) & 0x7f;
 
-    Info("SD mfg %02X app '%c%c' product '%.5s' rev %02X sn %08X mfg %02u/%04u\n",
-            cid->manufacturer_id,
-            cid->app_id[0], cid->app_id[1],
+    Info("SD mfg %02lX app '%s' product '%s' rev %02lX sn %08lX mfg %02lu/%04lu\n",
+            (unsigned long)cid->manufacturer_id,
+            cid->app_id,
             cid->product_name,
-            cid->product_rev,
-            (unsigned int)cid->product_sn,
-            (unsigned int)(cid->mfg_date & 0xf),
-            (unsigned int)((cid->mfg_date >> 8) + 2000));
+            (unsigned long)cid->product_rev,
+            (unsigned long)cid->product_sn,
+            (unsigned long)(cid->mfg_date & 0xf),
+            (unsigned long)((cid->mfg_date >> 4) + 2000));
 
     /* FIXME: Check CRC */
 
@@ -388,8 +388,26 @@ void sd_compute_chs_geometry(struct IDEUnit *unit)
 	unit->cylinders = cyl;
 	unit->heads = head;
 	unit->sectorsPerTrack = spt;
-	unit->blockSize = SD_SECTOR_SIZE;
 	unit->logicalSectors = total;
+
+	//set blocksize and blockshift
+    unit->blockSize  = SD_SECTOR_SIZE;
+    unit->blockShift = 0;
+	while ((unit->blockSize >> unit->blockShift) > 1)
+    {
+        unit->blockShift++;
+    }
+}
+
+//convert hex nibble to ASCII
+uint8_t sd_hex_nibble_to_char(uint8_t c)
+{
+    c &= 0x0f;
+    c += 0x30;
+    if(c>0x39)
+        c+=0x07;
+
+    return c;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -424,6 +442,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     if(unit->unitNum > 0)
     {
         //unit number not supported
+        Warn("unit not supported\n");
         return false;
     }
 
@@ -451,7 +470,7 @@ bool ata_init_unit(struct IDEUnit *unit)
             uint32_t ocr = sd_get_r7_resp(spi);
 
             if (ocr == 0x000001aa) {
-                Trace("SDv2 - R7 resp = 0x%08X\n", (unsigned int) ocr);
+                Trace("SDv2 - R7 resp = 0x%08lX\n", (unsigned long) ocr);
                 ci->type = sdCardType_SD2_0;
 
                 /* Wait for card ready */
@@ -512,7 +531,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     }
 
     if (ci->type) {
-        Info("SD card ready (type %u)\n", (unsigned int)ci->type);
+        Info("SD card ready (type %lu)\n", (unsigned long)ci->type);
 
         /* Read and decode card info */
         if (sd_send_cmd(spi, CMD10, 0) == 0) {
@@ -560,15 +579,13 @@ bool ata_init_unit(struct IDEUnit *unit)
     //compute CHS
     sd_compute_chs_geometry(unit);
 
-    unit->blockShift = 0;
-
     return true;
 }
 
 /**
  * ata_identify
  *
- * Fake the results of an ATA identify command and place it in the buffer
+ * Fake relevant fields of an ATA identify command and place it in the buffer
  * @param unit Pointer to an IDEUnit struct
  * @param buffer Pointer to the destination buffer
  * @return false on error
@@ -584,16 +601,32 @@ bool ata_identify(struct IDEUnit *unit, UWORD *buffer)
     //clear buffer
     memset(buffer, 0, SD_SECTOR_SIZE);
 
-    //firmware revision
-    buffer[ata_identify_fw_rev  ] = 0x30+((ci->cid.product_rev>>4)&0x0f);
-    buffer[ata_identify_fw_rev+1] = '.';
-    buffer[ata_identify_fw_rev+2] = 0x30+(ci->cid.product_rev&0x0f);
+    //firmware/product revision
+    uint8_t *revision = (uint8_t *)&buffer[ata_identify_fw_rev];
+    memset(revision, ' ', 8);
+    revision[0] = sd_hex_nibble_to_char(ci->cid.product_rev>>4);
+    revision[1] = '.';
+    revision[2] = sd_hex_nibble_to_char(ci->cid.product_rev);
 
-    //model
-    memcpy(&buffer[ata_identify_model], ci->cid.product_name, 5);
-    buffer[ata_identify_model+5] = '/';
-    buffer[ata_identify_model+6] = ci->cid.app_id[0];
-    buffer[ata_identify_model+7] = ci->cid.app_id[1];
+    //manufacturer and model
+    //"mfg. XX SD-CARD YYYYY"
+    uint8_t *model = (uint8_t *)&buffer[ata_identify_model];
+    memset(model, ' ', 40);
+    memcpy(&model[0], "mfg.", 4);
+    model[5] = sd_hex_nibble_to_char(ci->cid.manufacturer_id>>4);
+    model[6] = sd_hex_nibble_to_char(ci->cid.manufacturer_id);
+    memcpy(&model[8], "SD-CARD", 7);
+    memcpy(&model[16], ci->cid.product_name, 5);
+
+    //serial number
+    uint8_t *serial = (uint8_t *)&buffer[ata_identify_serial];
+    memset(serial, ' ', 20);
+    uint32_t sn = ci->cid.product_sn;
+    for(int16_t i=7; i>=0; i--)
+    {
+        serial[i] = sd_hex_nibble_to_char(sn);
+        sn>>=4;
+    }
 
     return true;
 }

@@ -93,8 +93,8 @@ typedef struct {
 
 typedef struct {
 	uint8_t		manufacturer_id;			/*!< manufacturer ID byte */
-	uint8_t		app_id[2];					/*!< OEM/application ID, ASCII */
-	uint8_t		product_name[5];			/*!< product name, ASCII */
+	uint8_t		app_id[3];					/*!< OEM/application ID, ASCII, NULL terminated */
+	uint8_t		product_name[6];			/*!< product name, ASCII, NULL terminated */
 	uint8_t		product_rev;				/*!< product revision, BCD */
 	uint32_t	product_sn;					/*!< product serial number */
 	uint16_t	mfg_date;					/*!< date of manufacture (0xYYM offset from 2000, e.g. 0x014 = Apr 2001) */
