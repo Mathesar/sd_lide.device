@@ -23,6 +23,7 @@
  *  10-07-2022		(DvW) now using spi_obtain and spi_release to support multiple devices on SPI bus
  *  07-12-2022		(DvW) now using new timer routines
  *  02-05-2025      (DvW) refactoring to be used with lide.device
+ *  19-05-2025      (DvW) added optional CRC checking
  */
 
 #include <devices/scsidisk.h>
@@ -38,6 +39,7 @@
 #include "debug.h"
 #include "device.h"
 #include "sd.h"
+#include "sd_crc.h"
 #include "atapi.h"
 #include "timer.h"
 #include "wait.h"
@@ -45,7 +47,8 @@
 
 #define SD_SECTOR_SIZE		    512
 #define SD_SECTOR_SHIFT		    9
-#define RESET_DELAY_MS          20
+#define RESET_DELAY_MS          50
+#define MAX_RESET_RETRIES       20
 #define READY_TIMEOUT_MS        500
 #define INIT_TIMEOUT_MS         1000
 #define MAX_RESPONSE_POLLS      10
@@ -71,6 +74,7 @@
 #define CMD38   (38)            /* ERASE */
 #define CMD55   (55)            /* APP_CMD */
 #define CMD58   (58)            /* READ_OCR */
+#define CMD59   (59)            /* CRC On/OFF */
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //SD support functions
@@ -143,8 +147,6 @@ static int sd_parse_csd(sd_card_info_t *ci, const uint32_t *bits)
     ci->block_size = csd->read_block_len;
     Info("block size = %lu bytes\n",(unsigned long)(1 << ci->block_size));
 
-    /* FIXME: Check CRC */
-
     return 0;
 }
 
@@ -182,8 +184,6 @@ static int sd_parse_cid(sd_card_info_t *ci, const uint32_t *bits)
             (unsigned long)cid->product_sn,
             (unsigned long)(cid->mfg_date & 0xf),
             (unsigned long)((cid->mfg_date >> 4) + 2000));
-
-    /* FIXME: Check CRC */
 
     return 0;
 }
@@ -256,7 +256,17 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     spi_read(spi, buf, size);
     spi_read(spi, crc, 2);
 
-    return 0;
+#ifdef SD_CRC_ENABLE
+    /* check CRC */
+    uint16_t crc16 = sd_compute_crc16(buf, size);
+    if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
+    {
+        Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);
+        return sdError_CRC16;
+    }
+#endif // SD_CRC_ENABLE
+
+    return sdError_OK;
 }
 
 static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
@@ -274,7 +284,16 @@ static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
     if (token != 0xfd) {
         /* Send data, except for STOP_TRAN */
         spi_write(spi, buf, SD_SECTOR_SIZE);
-        spi_write(spi, crc, 2); /* dummy */
+
+#ifdef SD_CRC_ENABLE
+        /* compute CRC */
+        uint16_t crc16 = sd_compute_crc16((uint8_t *)buf, SD_SECTOR_SIZE);
+        crc[0] = (crc16>>8) & 0xff;
+        crc[1] = crc16 & 0xff;
+#endif // SD_CRC_ENABLE
+
+        /* send CRC */
+        spi_write(spi, crc, 2);
 
         /* Receive data response */
         spi_read(spi, &resp, 1);
@@ -316,6 +335,10 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
     buf[2] = (uint8_t)(arg >> 16);
     buf[3] = (uint8_t)(arg >> 8);
     buf[4] = (uint8_t)(arg >> 0);
+
+#ifdef SD_CRC_ENABLE
+    buf[5] = sd_compute_crc7(buf, 5);
+#else
     if (cmd == CMD0) {
         buf[5] = 0x95; /* CRC for CMD0 */
     } else if (cmd == CMD8) {
@@ -323,6 +346,9 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
     } else {
         buf[5] = 0x01; /* Dummy CRC and stop */
     }
+#endif
+
+    /* send command */
     spi_write(spi, buf, sizeof(buf));
 
     /* Receive command response */
@@ -349,7 +375,7 @@ static uint32_t sd_get_r7_resp(spi_t *spi)
     return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) | ((uint32_t)buf[2] << 8) | ((uint32_t)buf[3] << 0);
 }
 
-// compute CHS geometry
+/* compute CHS geometry */
 void sd_compute_chs_geometry(struct IDEUnit *unit)
 {
     uint32_t i, head, cyl, spt;
@@ -384,13 +410,13 @@ void sd_compute_chs_geometry(struct IDEUnit *unit)
 		{	break;	}
 	}
 
-	//set CHS
+	/* set CHS */
 	unit->cylinders = cyl;
 	unit->heads = head;
 	unit->sectorsPerTrack = spt;
 	unit->logicalSectors = total;
 
-	//set blocksize and blockshift
+	/* set blocksize and blockshift */
     unit->blockSize  = SD_SECTOR_SIZE;
     unit->blockShift = 0;
 	while ((unit->blockSize >> unit->blockShift) > 1)
@@ -399,7 +425,7 @@ void sd_compute_chs_geometry(struct IDEUnit *unit)
     }
 }
 
-//convert hex nibble to ASCII
+/* convert hex nibble to ASCII */
 uint8_t sd_hex_nibble_to_char(uint8_t c)
 {
     c &= 0x0f;
@@ -429,7 +455,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     uint32_t resp[4];
     int err;
 
-    //initial values
+    /* initial values */
     unit->cylinders         = 0;
     unit->heads             = 0;
     unit->sectorsPerTrack   = 0;
@@ -441,12 +467,12 @@ bool ata_init_unit(struct IDEUnit *unit)
 
     if(unit->unitNum > 0)
     {
-        //unit number not supported
+        /* unit number not supported */
         Warn("unit not supported\n");
         return false;
     }
 
-    //initialize SPI interface
+    /* initialize SPI interface */
     if(spi_initialize(spi, SPI_CHANNEL_1, unit->SysBase) != 1)
         return false;
 
@@ -456,16 +482,26 @@ bool ata_init_unit(struct IDEUnit *unit)
     ci->total_sectors = 0;
     ci->block_size = sdBlockSize_512;
 
-    //reset sequence
+    /* init sequence */
     spi_obtain(spi);
     spi_deselect();
     cmd = 0xFF;
     for(int i=0; i<10; i++)
         spi_write(spi,&cmd,1);
-    timer_wait(TIMER_MILLIS(RESET_DELAY_MS));
 
-    //start init sequence
-    if (sd_send_cmd(spi, CMD0,0) == 1) {
+    /* send reset command and wait for card to go to IDLE state */
+    for (int n = 0; n < MAX_RESET_RETRIES; n++) {
+        if (sd_send_cmd(spi, CMD0,0) == 1) {
+            break;
+        }
+        timer_wait(TIMER_MILLIS(RESET_DELAY_MS));
+    }
+
+#ifdef SD_CRC_ENABLE
+    /* enable CRC for all further communication */
+    if((sd_send_cmd(spi, CMD59, 1)&0xfe) == 0) {
+#endif
+
         if (sd_send_cmd(spi, CMD8, 0x1aa) == 1) {
             uint32_t ocr = sd_get_r7_resp(spi);
 
@@ -480,6 +516,7 @@ bool ata_init_unit(struct IDEUnit *unit)
                         /* Init timed out - invalidate card */
                         Warn("Init timed out\n");
                         ci->type = sdCardType_None;
+                        break;
                     }
                 }
 
@@ -517,6 +554,7 @@ bool ata_init_unit(struct IDEUnit *unit)
                     /* Init timed out - invalidate card */
                     Warn("Init timed out\n");
                     ci->type = sdCardType_None;
+                    break;
                 }
             }
 
@@ -528,7 +566,9 @@ bool ata_init_unit(struct IDEUnit *unit)
                 }
             }
         }
+#ifdef SD_CRC_ENABLE
     }
+#endif // SD_CRC_ENABLE
 
     if (ci->type) {
         Info("SD card ready (type %lu)\n", (unsigned long)ci->type);

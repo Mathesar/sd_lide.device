@@ -30,6 +30,8 @@ typedef enum {
 	sdError_Timeout = -2,
 	sdError_BadResponse = -3,
 	sdError_Unsupported = -4,
+	sdError_CRC16 = -5,
+	sdError_CRC7 = -6
 } sd_error_t;
 
 typedef enum {
