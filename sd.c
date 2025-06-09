@@ -172,11 +172,22 @@ static int sd_parse_cid(sd_card_info_t *ci, const uint32_t *bits)
     cid->product_name[2] = (bits[1] >> 16) & 0xff;
     cid->product_name[3] = (bits[1] >> 8) & 0xff;
     cid->product_name[4] = (bits[1] >> 0) & 0xff;
-    cid->product_rev = (bits[2] >> 24) & 0xff;
-    cid->product_sn = (bits[2] << 8) & 0xffffff00;
-    cid->product_sn |= (bits[3] >> 24) & 0xff;
-    cid->mfg_date = (bits[3] >> 8) & 0xfff;
-    cid->crc = (bits[3] >> 1) & 0x7f;
+    if(ci->type == sdCardType_MMC) {
+        cid->product_name[5] = (bits[2] >> 24) & 0xff;
+        cid->product_rev = (bits[2] >> 16) & 0xff;
+        cid->product_sn = (bits[2] << 16) & 0xffff0000;
+        cid->product_sn |= (bits[3] >> 16) & 0xffff;
+        cid->mfg_year = ((bits[3] >> 8) & 0xf) + 1997;
+        cid->mfg_month = (bits[3] >> 12) & 0xf;
+        cid->crc = (bits[3] >> 1) & 0x7f;
+    } else {
+        cid->product_rev = (bits[2] >> 24) & 0xff;
+        cid->product_sn = (bits[2] << 8) & 0xffffff00;
+        cid->product_sn |= (bits[3] >> 24) & 0xff;
+        cid->mfg_year = ((bits[3] >> 12) & 0xff) + 2000;
+        cid->mfg_month = (bits[3] >> 8) & 0xf;
+        cid->crc = (bits[3] >> 1) & 0x7f;
+    }
 
     Info("SD mfg %02lX app '%s' product '%s' rev %02lX sn %08lX mfg %02lu/%04lu\n",
             (unsigned long)cid->manufacturer_id,
@@ -184,8 +195,8 @@ static int sd_parse_cid(sd_card_info_t *ci, const uint32_t *bits)
             cid->product_name,
             (unsigned long)cid->product_rev,
             (unsigned long)cid->product_sn,
-            (unsigned long)(cid->mfg_date & 0xf),
-            (unsigned long)((cid->mfg_date >> 4) + 2000));
+            (unsigned long)cid->mfg_month,
+            (unsigned long)cid->mfg_year);
 
     return 0;
 }
@@ -661,7 +672,7 @@ bool ata_identify(struct IDEUnit *unit, UWORD *buffer)
     model[5] = sd_hex_nibble_to_char(ci->cid.manufacturer_id>>4);
     model[6] = sd_hex_nibble_to_char(ci->cid.manufacturer_id);
     memcpy(&model[8], "SD-CARD", 7);
-    memcpy(&model[16], ci->cid.product_name, 5);
+    memcpy(&model[16], ci->cid.product_name, 6);
 
     //serial number
     uint8_t *serial = (uint8_t *)&buffer[ata_identify_serial];
