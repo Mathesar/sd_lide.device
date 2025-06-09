@@ -23,6 +23,7 @@
 
 #include "spi.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef enum {
 	sdError_OK = 0,
@@ -30,8 +31,7 @@ typedef enum {
 	sdError_Timeout = -2,
 	sdError_BadResponse = -3,
 	sdError_Unsupported = -4,
-	sdError_CRC16 = -5,
-	sdError_CRC7 = -6
+	sdError_CRC = -5
 } sd_error_t;
 
 typedef enum {
@@ -110,6 +110,7 @@ typedef struct {
 	sd_card_csd_t		csd;
 	sd_card_cid_t		cid;
 	spi_t               spi;
+	bool                crc_enabled;
 } sd_card_info_t;
 
 #endif

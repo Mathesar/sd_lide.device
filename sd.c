@@ -47,11 +47,12 @@
 
 #define SD_SECTOR_SIZE		    512
 #define SD_SECTOR_SHIFT		    9
-#define RESET_DELAY_MS          50
-#define MAX_RESET_RETRIES       20
+#define RESET_DELAY_MS          20
+#define RESET_MAX_RETRIES       25
 #define READY_TIMEOUT_MS        500
 #define INIT_TIMEOUT_MS         1000
 #define MAX_RESPONSE_POLLS      10
+#define MAX_READ_WRITE_RETRIES  20
 
 /* MMC/SD command */
 #define CMD0    (0)             /* GO_IDLE_STATE */
@@ -61,6 +62,7 @@
 #define CMD9    (9)             /* SEND_CSD */
 #define CMD10   (10)            /* SEND_CID */
 #define CMD12   (12)            /* STOP_TRANSMISSION */
+#define CMD13   (13)            /* SD_STATUS */
 #define ACMD13  (0x80+13)       /* SD_STATUS (SDC) */
 #define CMD16   (16)            /* SET_BLOCKLEN */
 #define CMD17   (17)            /* READ_SINGLE_BLOCK */
@@ -248,7 +250,7 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
         spi_read(spi, &token, 1);
     } while (token == 0xff && !timer_check(timeout));
     if (token != 0xfe) {
-        Warn("No data token received\n");
+        Warn("No data token received:0x%02lx\n",(unsigned long)token);
         return sdError_Timeout;
     }
 
@@ -262,7 +264,7 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
     {
         Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);
-        return sdError_CRC16;
+        return sdError_CRC;
     }
 #endif // SD_CRC_ENABLE
 
@@ -481,6 +483,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     ci->type = sdCardType_None;
     ci->total_sectors = 0;
     ci->block_size = sdBlockSize_512;
+    ci->crc_enabled = false;
 
     /* init sequence */
     spi_obtain(spi);
@@ -489,67 +492,34 @@ bool ata_init_unit(struct IDEUnit *unit)
     for(int i=0; i<10; i++)
         spi_write(spi,&cmd,1);
 
-    /* send reset command and wait for card to go to IDLE state */
-    for (int n = 0; n < MAX_RESET_RETRIES; n++) {
-        if (sd_send_cmd(spi, CMD0,0) == 1) {
+    /* send reset commands until card goes to IDLE state */
+    for (int retries = 0; retries < RESET_MAX_RETRIES; retries++) {
+        timer_wait(TIMER_MILLIS(RESET_DELAY_MS));
+        if (sd_send_cmd(spi, CMD0, 0) == 1) {
             break;
         }
-        timer_wait(TIMER_MILLIS(RESET_DELAY_MS));
     }
 
 #ifdef SD_CRC_ENABLE
-    /* enable CRC for all further communication */
+    /* enable CRC */
     if((sd_send_cmd(spi, CMD59, 1)&0xfe) == 0) {
+        ci->crc_enabled = true;
+    } else {
+         Warn("Failed to enable CRC\n");
+    }
 #endif
 
-        if (sd_send_cmd(spi, CMD8, 0x1aa) == 1) {
-            uint32_t ocr = sd_get_r7_resp(spi);
+    if (sd_send_cmd(spi, CMD8, 0x1aa) == 1) {
+        /* SDv2 */
+        uint32_t ocr = sd_get_r7_resp(spi);
 
-            if (ocr == 0x000001aa) {
-                Trace("SDv2 - R7 resp = 0x%08lX\n", (unsigned long) ocr);
-                ci->type = sdCardType_SD2_0;
-
-                /* Wait for card ready */
-                timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
-                while (sd_send_cmd(spi, ACMD41, (1ul << 30)) > 0) {
-                    if (timer_check(timeout)) {
-                        /* Init timed out - invalidate card */
-                        Warn("Init timed out\n");
-                        ci->type = sdCardType_None;
-                        break;
-                    }
-                }
-
-                if (ci->type) {
-                    /* Read OCR */
-                    if (sd_send_cmd(spi, CMD58, 0) == 0) {
-                        ocr = sd_get_r7_resp(spi);
-                        if (ocr & (1ul << 30)) {
-                            /* Card is high capacity */
-                            Trace("SDHC\n");
-                            ci->type = sdCardType_SDHC;
-                        }
-                    } else {
-                        Warn("Failed to read OCR\n");
-                        ci->type = sdCardType_None;
-                    }
-                }
-            }
-        } else {
-            /* Not SDv2 */
-            if (sd_send_cmd(spi, ACMD41, 0) <= 1) {
-                Trace("SDv1\n");
-                ci->type = sdCardType_SD1_x;
-                cmd = ACMD41;
-            } else {
-                Trace("MMCv3\n");
-                ci->type = sdCardType_MMC;
-                cmd = CMD1;
-            }
+        if (ocr == 0x000001aa) {
+            Trace("SDv2 - R7 resp = 0x%08lX\n", (unsigned long) ocr);
+            ci->type = sdCardType_SD2_0;
 
             /* Wait for card ready */
             timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
-            while (sd_send_cmd(spi, cmd, 0) > 0) {
+            while (sd_send_cmd(spi, ACMD41, (1ul << 30)) > 0) {
                 if (timer_check(timeout)) {
                     /* Init timed out - invalidate card */
                     Warn("Init timed out\n");
@@ -559,16 +529,51 @@ bool ata_init_unit(struct IDEUnit *unit)
             }
 
             if (ci->type) {
-                /* Set block length */
-                if (sd_send_cmd(spi, CMD16, SD_SECTOR_SIZE) > 0) {
-                    Warn("Failed to set block length\n");
+                /* Read OCR */
+                if (sd_send_cmd(spi, CMD58, 0) == 0) {
+                    ocr = sd_get_r7_resp(spi);
+                    if (ocr & (1ul << 30)) {
+                        /* Card is high capacity */
+                        Trace("SDHC\n");
+                        ci->type = sdCardType_SDHC;
+                    }
+                } else {
+                    Warn("Failed to read OCR\n");
                     ci->type = sdCardType_None;
                 }
             }
         }
-#ifdef SD_CRC_ENABLE
+    } else {
+        /* Not SDv2, check SDv1 or MMCv3  */
+        if (sd_send_cmd(spi, ACMD41, 0) <= 1) {
+            Trace("SDv1\n");
+            ci->type = sdCardType_SD1_x;
+            cmd = ACMD41;
+        } else {
+            Trace("MMCv3\n");
+            ci->type = sdCardType_MMC;
+            cmd = CMD1;
+        }
+
+        /* Wait for card ready */
+        timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
+        while (sd_send_cmd(spi, cmd, 0) > 0) {
+            if (timer_check(timeout)) {
+                /* Init timed out - invalidate card */
+                Warn("Init timed out\n");
+                ci->type = sdCardType_None;
+                break;
+            }
+        }
+
+        if (ci->type) {
+            /* Set block length */
+            if (sd_send_cmd(spi, CMD16, SD_SECTOR_SIZE) > 0) {
+                Warn("Failed to set block length\n");
+                ci->type = sdCardType_None;
+            }
+        }
     }
-#endif // SD_CRC_ENABLE
 
     if (ci->type) {
         Info("SD card ready (type %lu)\n", (unsigned long)ci->type);
@@ -691,36 +696,59 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
         Warn("No card\n");
         return IOERR_OPENFAIL;
     }
+
     if (ci->type != sdCardType_SDHC) {
         /* Convert lba to byte addressing (x512) */
         lba <<= 9;
     }
 
-    if (count == 1) {
-        /* Read single sector */
-        if (sd_send_cmd(spi, CMD17, lba) == 0) {
-            err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
-        } else {
-            err = sdError_BadResponse;
-        }
-    } else {
-        /* Read multiple sectors */
-        if (sd_send_cmd(spi, CMD18, lba) == 0) {
-            do {
+    for(int16_t retries=0; retries<MAX_READ_WRITE_RETRIES; retries++) {
+        if (count == 1) {
+            /* Read single sector */
+            if (sd_send_cmd(spi, CMD17, lba) == 0) {
                 err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
-                if (err < 0) {
+
+                if(err == sdError_OK) {
+                    /* success! */
                     break;
                 }
-                buffer += SD_SECTOR_SIZE;
-            } while (--count);
 
-            /* Send CMD12 stop transmission */
-            if (err == 0) {
-                err = sd_send_cmd(spi, CMD12, 0);
+            } else {
+                err = sdError_BadResponse;
             }
         } else {
-            err = sdError_BadResponse;
+            /* Read multiple sectors */
+            if (sd_send_cmd(spi, CMD18, lba) == 0) {
+                do {
+                    err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
+                    if(err != sdError_OK) {
+                        /* when we get an error here it is often due to a spurious (extra) clock cycle
+                        therefore we wiggle CS to re-align before sending CMD12*/
+                        sd_deselect(spi);
+                        sd_select(spi);
+                        break;
+                    }
+                    buffer += SD_SECTOR_SIZE;
+                } while (--count);
+
+                /* Send CMD12 stop transmission */
+                if(sd_send_cmd(spi, CMD12, 0) != 0) {
+                    if(sd_send_cmd(spi, CMD12, 0) != 0) {
+                        Warn("Could not send CMD12\n");
+                    }
+                }
+
+                if(err == sdError_OK) {
+                    /* success! */
+                    break;
+                }
+            } else {
+                err = sdError_BadResponse;
+            }
         }
+
+        /* read error */
+        Warn("SD read error %ld, %lu blocks remaining, retrying\n", (long)err, (unsigned long)count);
     }
 
     sd_deselect(spi);
