@@ -149,7 +149,7 @@ static int sd_parse_csd(sd_card_info_t *ci, const uint32_t *bits)
     ci->block_size = csd->read_block_len;
     Info("block size = %lu bytes\n",(unsigned long)(1 << ci->block_size));
 
-    return 0;
+    return sdError_OK;
 }
 
 /*! Utility function for parsing CID fields */
@@ -198,7 +198,7 @@ static int sd_parse_cid(sd_card_info_t *ci, const uint32_t *bits)
             (unsigned long)cid->mfg_month,
             (unsigned long)cid->mfg_year);
 
-    return 0;
+    return sdError_OK;
 }
 
 static int sd_wait_ready(spi_t *spi)
@@ -213,11 +213,15 @@ static int sd_wait_ready(spi_t *spi)
 	}
 	while ( (in != 0xff) && !timer_check(timeout) );
 
-	return (in == 0xff) ? 0 : sdError_Timeout;
+	return (in == 0xff) ? sdError_OK : sdError_Timeout;
 }
 
+/* de-select the SD card and release the shared SPI resource */
 static void sd_deselect(spi_t *spi)
 {
+    //obtain the bus before doing anything
+    spi_obtain(spi);
+
     //de-assert /CS
     spi_deselect();
 
@@ -229,6 +233,7 @@ static void sd_deselect(spi_t *spi)
     spi_release(spi);
 }
 
+/* acquire the shared SPI resource if needed and select the SD card */
 static int sd_select(spi_t *spi)
 {
     //obtain the bus before doing anything
@@ -238,9 +243,9 @@ static int sd_select(spi_t *spi)
     spi_select(spi);
 
 	//wait for card ready
-    if (sd_wait_ready(spi) == 0)
+    if (sd_wait_ready(spi) == sdError_OK)
     {
-   		return 0;
+   		return sdError_OK;
     }
 
     //timeout, de-assert /CS
@@ -261,7 +266,6 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
         spi_read(spi, &token, 1);
     } while (token == 0xff && !timer_check(timeout));
     if (token != 0xfe) {
-        Warn("No data token received:0x%02lx\n",(unsigned long)token);
         return sdError_Timeout;
     }
 
@@ -269,7 +273,7 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     spi_read(spi, buf, size);
     spi_read(spi, crc, 2);
 
-#ifdef SD_CRC_ENABLE
+#ifndef SD_CRC_DISABLE
     /* check CRC */
     uint16_t crc16 = sd_compute_crc16(buf, size);
     if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
@@ -277,7 +281,7 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
         Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);
         return sdError_CRC;
     }
-#endif // SD_CRC_ENABLE
+#endif // SD_CRC_DISABLE
 
     return sdError_OK;
 }
@@ -298,12 +302,12 @@ static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
         /* Send data, except for STOP_TRAN */
         spi_write(spi, buf, SD_SECTOR_SIZE);
 
-#ifdef SD_CRC_ENABLE
+#ifndef SD_CRC_DISABLE
         /* compute CRC */
         uint16_t crc16 = sd_compute_crc16((uint8_t *)buf, SD_SECTOR_SIZE);
         crc[0] = (crc16>>8) & 0xff;
         crc[1] = crc16 & 0xff;
-#endif // SD_CRC_ENABLE
+#endif // SD_CRC_DISABLE
 
         /* send CRC */
         spi_write(spi, crc, 2);
@@ -316,7 +320,7 @@ static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
         }
     }
 
-    return 0;
+    return sdError_OK;
 }
 
 static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
@@ -349,7 +353,7 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
     buf[3] = (uint8_t)(arg >> 8);
     buf[4] = (uint8_t)(arg >> 0);
 
-#ifdef SD_CRC_ENABLE
+#ifndef SD_CRC_DISABLE
     buf[5] = sd_compute_crc7(buf, 5);
 #else
     if (cmd == CMD0) {
@@ -359,7 +363,7 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
     } else {
         buf[5] = 0x01; /* Dummy CRC and stop */
     }
-#endif
+#endif // SD_CRC_DISABLE
 
     /* send command */
     spi_write(spi, buf, sizeof(buf));
@@ -389,7 +393,7 @@ static uint32_t sd_get_r7_resp(spi_t *spi)
 }
 
 /* compute CHS geometry */
-void sd_compute_chs_geometry(struct IDEUnit *unit)
+static void sd_compute_chs_geometry(struct IDEUnit *unit)
 {
     uint32_t i, head, cyl, spt;
 	uint32_t sptt[] = { 63, 127, 255 };
@@ -439,7 +443,7 @@ void sd_compute_chs_geometry(struct IDEUnit *unit)
 }
 
 /* convert hex nibble to ASCII */
-uint8_t sd_hex_nibble_to_char(uint8_t c)
+static uint8_t sd_hex_nibble_to_char(uint8_t c)
 {
     c &= 0x0f;
     c += 0x30;
@@ -511,14 +515,14 @@ bool ata_init_unit(struct IDEUnit *unit)
         }
     }
 
-#ifdef SD_CRC_ENABLE
+#ifndef SD_CRC_DISABLE
     /* enable CRC */
     if((sd_send_cmd(spi, CMD59, 1)&0xfe) == 0) {
         ci->crc_enabled = true;
     } else {
          Warn("Failed to enable CRC\n");
     }
-#endif
+#endif // SD_CRC_DISABLE
 
     if (sd_send_cmd(spi, CMD8, 0x1aa) == 1) {
         /* SDv2 */
@@ -701,7 +705,7 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
 {
     sd_card_info_t *ci = &unit->sd_card_info;
     spi_t *spi = &unit->sd_card_info.spi;
-    int err = 0;
+    int err = sdError_OK;
 
     if (ci->type == sdCardType_None) {
         Warn("No card\n");
