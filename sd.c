@@ -24,6 +24,7 @@
  *  07-12-2022		(DvW) now using new timer routines
  *  02-05-2025      (DvW) refactoring to be used with lide.device
  *  19-05-2025      (DvW) added optional CRC checking
+ *  17-06-2025      (DvW) added error recovery mechanism for read, also added single block read function
  */
 
 #include <devices/scsidisk.h>
@@ -691,6 +692,8 @@ bool ata_identify(struct IDEUnit *unit, UWORD *buffer)
     return true;
 }
 
+#ifdef SD_MULTIBLOCK_ENABLE
+
 /**
  * ata_read
  *
@@ -733,9 +736,11 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
             }
         } else {
             /* Read multiple sectors */
+            ULONG block_count  = count;
+            void *block_buffer = buffer;
             if (sd_send_cmd(spi, CMD18, lba) == 0) {
                 do {
-                    err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
+                    err = sd_read_block(spi, block_buffer, SD_SECTOR_SIZE);
                     if(err != sdError_OK) {
                         /* when we get an error here it is often due to a spurious (extra) clock cycle
                         therefore we wiggle CS to re-align before sending CMD12*/
@@ -743,8 +748,8 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
                         sd_select(spi);
                         break;
                     }
-                    buffer += SD_SECTOR_SIZE;
-                } while (--count);
+                    block_buffer += SD_SECTOR_SIZE;
+                } while (--block_count);
 
                 /* Send CMD12 stop transmission */
                 if(sd_send_cmd(spi, CMD12, 0) != 0) {
@@ -763,17 +768,76 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
         }
 
         /* read error */
-        Warn("SD read error %ld, %lu blocks remaining, retrying\n", (long)err, (unsigned long)count);
+        Warn("SD read error %ld, retrying\n", (long)err);
     }
 
     sd_deselect(spi);
 
-    //return IOERR_ABORTED if error occurred
+    /* return IOERR_ABORTED if error occurred */
     if(err != sdError_OK)
         return IOERR_ABORTED;
     else
         return 0;
 }
+
+#else
+
+/**
+ * ata_read
+ *
+ * Read blocks from the SD card
+ * @param buffer destination buffer
+ * @param lba LBA Address
+ * @param count Number of blocks to transfer
+ * @param unit Pointer to the unit structure
+ * @returns error
+*/
+BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
+{
+    sd_card_info_t *ci = &unit->sd_card_info;
+    spi_t *spi = &unit->sd_card_info.spi;
+    int16_t retries = MAX_READ_WRITE_RETRIES;
+
+    if (ci->type == sdCardType_None) {
+        Warn("No card\n");
+        return IOERR_OPENFAIL;
+    }
+
+    do {
+        /* compute sd card address */
+        ULONG sd_address = lba;
+        if (ci->type != sdCardType_SDHC) {
+            /* Convert sd_address to byte addressing (x512) */
+            sd_address <<= 9;
+        }
+
+        /* Read single sector */
+        if (sd_send_cmd(spi, CMD17, sd_address) == 0) {
+            if(sd_read_block(spi, buffer, SD_SECTOR_SIZE) == sdError_OK) {
+                /* block read successfully */
+                if(--count == 0) {
+                    /* all blocks done */
+                    sd_deselect(spi);
+                    return 0;
+                }
+                lba++;
+                buffer += SD_SECTOR_SIZE;
+                continue;
+            }
+        }
+
+        /* read error */
+        Warn("SD read error %lu blocks remaining, retrying\n", (unsigned long)count);
+        retries--;
+
+    } while(retries);
+
+    sd_deselect(spi);
+    /* return IOERR_ABORTED if error occurred */
+    return IOERR_ABORTED;
+}
+
+#endif // SD_MULTIBLOCK_ENABLE
 
 /**
  * ata_write
@@ -833,7 +897,7 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
 
     sd_deselect(spi);
 
-    //return IOERR_ABORTED if error occurred
+    /* return IOERR_ABORTED if error occurred */
     if(err != sdError_OK)
         return IOERR_ABORTED;
     else
