@@ -19,12 +19,13 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
- #ifndef SD_CRC_H_INCLUDED
+#ifndef SD_CRC_H_INCLUDED
 
- #include <stdint.h>
+#include <stdint.h>
 
- uint8_t sd_compute_crc7(uint8_t *data, uint16_t size);
- uint16_t sd_compute_crc16(uint8_t *data, uint16_t size);
+uint8_t sd_compute_crc7(uint8_t *data, uint16_t size);
+uint16_t sd_compute_crc16(uint8_t *data, uint16_t size);
 
+uint16_t sd_compute_crc16_fast(uint8_t *data asm("a0"), uint16_t size asm("d0"));
 
- #endif // SD_CRC_H_INCLUDED
+#endif // SD_CRC_H_INCLUDED
