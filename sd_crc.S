@@ -25,7 +25,7 @@
                     // computed CRC is returned in d0
 
 _sd_compute_crc16_fast:
-                    movem       d1-d3/a1-a2,-(SP)           // push on stack
+                    movem.l     d1-d3/a0-a2,-(sp)           // push on stack
 
                     lea         .sd_crc_table_high(PC),a1
                     lea         .sd_crc_table_low(PC),a2
@@ -50,7 +50,7 @@ _sd_compute_crc16_fast:
                     lsl.w       #8,d1
                     or.w        d1,d0
 
-                    movem       (SP)+,d1-d3/a1-a2           // pop from stack
+                    movem.l     (sp)+,d1-d3/a0-a2           // pop from stack
                     rts
 
 .sd_crc_table_high:
