@@ -1,9 +1,7 @@
 /*
  *  SPI SD device driver
  *
- *  original code by Mike Stirling (2018)
- *  adapted for use with A500 Simple SPI hardware by Dennis van Weeren (2022)
- *  adapted to act as ATA device to work with lide.device by Dennis van Weeren (2025)
+ *  CRC functions by Dennis van Weeren (2025)
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -47,7 +45,7 @@ uint16_t sd_crc16_byte(uint16_t crcval, uint8_t byte)
 }
 
 //compute CRC-7
-uint8_t sd_compute_crc7(uint8_t *data, uint16_t size)
+uint8_t sd_compute_crc7_slow(uint8_t *data, uint16_t size)
 {
     register uint8_t crc_7 = 0;
 
@@ -77,7 +75,7 @@ uint8_t sd_compute_crc7(uint8_t *data, uint16_t size)
 }
 
 //compute crc16
-uint16_t sd_compute_crc16(uint8_t *data, uint16_t size)
+uint16_t sd_compute_crc16_slow(uint8_t *data, uint16_t size)
 {
     uint16_t crc_16 = 0;
 

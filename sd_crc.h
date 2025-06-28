@@ -23,9 +23,12 @@
 
 #include <stdint.h>
 
-uint8_t sd_compute_crc7(uint8_t *data, uint16_t size);
-uint16_t sd_compute_crc16(uint8_t *data, uint16_t size);
+// slow, C-based functions
+uint8_t sd_compute_crc7_slow(uint8_t *data, uint16_t size);
+uint16_t sd_compute_crc16_slow(uint8_t *data, uint16_t size);
 
+// fast, assembly based functions
+uint8_t sd_compute_crc7_fast(uint8_t *data asm("a0"), uint16_t size asm("d0"));
 uint16_t sd_compute_crc16_fast(uint8_t *data asm("a0"), uint16_t size asm("d0"));
 
 #endif // SD_CRC_H_INCLUDED

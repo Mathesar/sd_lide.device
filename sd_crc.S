@@ -17,12 +17,15 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
         XDEF        _sd_compute_crc16_fast
+        XDEF        _sd_compute_crc7_fast
 
+/**************************************************************************************************/
+/**************************************************************************************************/
 /**************************************************************************************************/
 
 					// a0 = UBYTE pointer to data buffer
                     // d0 = UWORD size
-                    // computed CRC is returned in d0
+                    // computed UWORD CRC is returned in d0
 
 _sd_compute_crc16_fast:
                     movem.l     d1-d3/a0-a2,-(sp)           // push on stack
@@ -34,24 +37,69 @@ _sd_compute_crc16_fast:
                     move.q      #0,d2                       // CRC low
                     move.q      #0,d3                       // table index
 
-                    bra         .sd_compute_crc16_fast_start
+                    bra         .sd_compute_crc16_start
 
-.sd_compute_crc16_fast_loop:
+.sd_compute_crc16_loop:
 					move.b	    (a0)+,d3				    // fetch byte from buffer
 					eor.b       d1,d3                       // compute index in table
 					move.b      0(a1,d3.w),d1               // fetch high byte from table
 					eor.b       d2,d1					    // xor low byte of previous CRC into high byte of new CRC
 					move.b      0(a2,d3.w),d2               // fetch low byte from table
 
-.sd_compute_crc16_fast_start:
-                    dbra		d0,.sd_compute_crc16_fast_loop
+.sd_compute_crc16_start:
+                    dbra		d0,.sd_compute_crc16_loop
 
-                    move.w      d2,d0                       // result in d0
+                    move.l      d2,d0                       // result in d0
                     lsl.w       #8,d1
                     or.w        d1,d0
 
                     movem.l     (sp)+,d1-d3/a0-a2           // pop from stack
                     rts
+
+/**************************************************************************************************/
+/**************************************************************************************************/
+/**************************************************************************************************/
+
+					// a0 = UBYTE pointer to data buffer
+                    // d0 = UWORD size
+                    // computed UBYTE CRC is returned in d0
+
+_sd_compute_crc7_fast:
+                    movem.l     d1-d4/a0,-(sp)              // push on stack
+                    move.q      #0,d2                       // CRC
+                    move.b      #9,d3                       // polynomial
+                    bra         .sd_compute_crc7_start
+
+.sd_compute_crc7_lp1:
+					move.b	    (a0)+,d4				    // c = *(data++)
+					move.q      #7,d1                       // do for all bits in a byte
+.sd_compute_crc7_lp2:
+					add.b       d2,d2                       // CRC <<= 1
+
+					btst.b      #7,d4                       // if (c&0x80)
+					beq         .sd_compute_crc7_skip1
+					eor.b       d3,d2                       // CRC ^= polynomial
+.sd_compute_crc7_skip1:
+
+					btst.b      #7,d2                       // if (CRC&0x80)
+					beq         .sd_compute_crc7_skip2
+					eor.b       d3,d2                       // CRC ^= polynomial
+.sd_compute_crc7_skip2:
+
+					add.b       d4,d4                       // c <<= 1
+					dbra		d1,.sd_compute_crc7_lp2
+.sd_compute_crc7_start:
+					dbra		d0,.sd_compute_crc7_lp1
+					add.b       d2,d2                       // CRC <<= 1
+					addq        #1,d2                       // set LSB
+
+					move.l      d2,d0                       // result in d0
+					movem.l     (sp)+,d1-d4/a0              // pop from stack
+                    rts
+
+/**************************************************************************************************/
+/**************************************************************************************************/
+/**************************************************************************************************/
 
 .sd_crc_table_high:
                     dc.b 0,16,32,48,64,80,96,112,129,145,161,177,193,209,225,241
