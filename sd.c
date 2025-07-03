@@ -220,7 +220,8 @@ static int sd_wait_ready(spi_t *spi)
 /* de-select the SD card and release the shared SPI resource */
 static void sd_deselect(spi_t *spi)
 {
-    //obtain the bus before doing anything
+    //sd_send_command() calls this function first so make
+    //sure we obtain the bus before doing anything
     spi_obtain(spi);
 
     //de-assert /CS
@@ -256,6 +257,14 @@ static int sd_select(spi_t *spi)
     return sdError_Timeout;
 }
 
+static void sd_send_idle_bytes(spi_t *spi, uint16_t n_bytes)
+{
+    uint8_t cmd = 0xFF;
+    do {
+        spi_write(spi,&cmd,1);
+    } while(n_bytes--);
+}
+
 static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
 {
 	TIMER timeout;
@@ -276,7 +285,7 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
 
 #ifndef SD_CRC_DISABLE
     /* check CRC */
-    uint16_t crc16 = sd_compute_crc16(buf, size);
+    uint16_t crc16 = sd_compute_crc16_fast(buf, size);
     if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
     {
         Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);
@@ -297,18 +306,18 @@ static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
         return sdError_Timeout;
     }
 
+#ifndef SD_CRC_DISABLE
+    /* compute CRC */
+    uint16_t crc16 = sd_compute_crc16_fast((uint8_t *)buf, SD_SECTOR_SIZE);
+    crc[0] = (crc16>>8) & 0xff;
+    crc[1] = crc16 & 0xff;
+#endif // SD_CRC_DISABLE
+
     /* Send token */
     spi_write(spi, &token, 1);
     if (token != 0xfd) {
         /* Send data, except for STOP_TRAN */
         spi_write(spi, buf, SD_SECTOR_SIZE);
-
-#ifndef SD_CRC_DISABLE
-        /* compute CRC */
-        uint16_t crc16 = sd_compute_crc16((uint8_t *)buf, SD_SECTOR_SIZE);
-        crc[0] = (crc16>>8) & 0xff;
-        crc[1] = crc16 & 0xff;
-#endif // SD_CRC_DISABLE
 
         /* send CRC */
         spi_write(spi, crc, 2);
@@ -353,18 +362,7 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
     buf[2] = (uint8_t)(arg >> 16);
     buf[3] = (uint8_t)(arg >> 8);
     buf[4] = (uint8_t)(arg >> 0);
-
-#ifndef SD_CRC_DISABLE
-    buf[5] = sd_compute_crc7(buf, 5);
-#else
-    if (cmd == CMD0) {
-        buf[5] = 0x95; /* CRC for CMD0 */
-    } else if (cmd == CMD8) {
-        buf[5] = 0x87; /* CRC for CMD8 */
-    } else {
-        buf[5] = 0x01; /* Dummy CRC and stop */
-    }
-#endif // SD_CRC_DISABLE
+    buf[5] = sd_compute_crc7_fast(buf, 5);
 
     /* send command */
     spi_write(spi, buf, sizeof(buf));
@@ -504,9 +502,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     /* init sequence */
     spi_obtain(spi);
     spi_deselect();
-    cmd = 0xFF;
-    for(int i=0; i<10; i++)
-        spi_write(spi,&cmd,1);
+    sd_send_idle_bytes(spi, 10);
 
     /* send reset commands until card goes to IDLE state */
     for (int retries = 0; retries < RESET_MAX_RETRIES; retries++) {
@@ -797,6 +793,7 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
     sd_card_info_t *ci = &unit->sd_card_info;
     spi_t *spi = &unit->sd_card_info.spi;
     int16_t retries = MAX_READ_WRITE_RETRIES;
+    int err = sdError_OK;
 
     if (ci->type == sdCardType_None) {
         Warn("No card\n");
@@ -813,7 +810,8 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
 
         /* Read single sector */
         if (sd_send_cmd(spi, CMD17, sd_address) == 0) {
-            if(sd_read_block(spi, buffer, SD_SECTOR_SIZE) == sdError_OK) {
+            err = sd_read_block(spi, buffer, SD_SECTOR_SIZE);
+            if(err == sdError_OK) {
                 /* block read successfully */
                 if(--count == 0) {
                     /* all blocks done */
@@ -825,15 +823,22 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
                 continue;
             }
         }
+        else {
+            err = sdError_BadResponse;
+        }
 
         /* read error */
-        Warn("SD read error %lu blocks remaining, retrying\n", (unsigned long)count);
+        Warn("SD read error %ld, %lu blocks remaining, retrying\n", (long)err, (unsigned long)count);
         retries--;
+
+        /* finish read */
+        sd_send_idle_bytes(spi, SD_SECTOR_SIZE);
 
     } while(retries);
 
     sd_deselect(spi);
-    /* return IOERR_ABORTED if error occurred */
+
+    /* return IOERR_ABORTED */
     return IOERR_ABORTED;
 }
 
