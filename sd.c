@@ -298,8 +298,20 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
 
 static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
 {
-    uint8_t crc[2] = {0xff, 0xff};
+    uint8_t crc[2];
     uint8_t resp;
+
+#ifndef SD_CRC_DISABLE
+    if (token != 0xfd) {
+        /* compute CRC now as we need to wait for card to get ready anyway*/
+        uint16_t crc16 = sd_compute_crc16_fast((uint8_t *)buf, SD_SECTOR_SIZE);
+        crc[0] = (crc16>>8) & 0xff;
+        crc[1] = crc16 & 0xff;
+    }
+#else
+    crc[0] = 0xff;
+    crc[1] = 0xff;
+#endif // SD_CRC_DISABLE
 
     if (sd_wait_ready(spi) < 0) {
         Warn("Card not ready\n");
@@ -309,13 +321,6 @@ static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
     /* Send token */
     spi_write(spi, &token, 1);
     if (token != 0xfd) {
-#ifndef SD_CRC_DISABLE
-        /* compute CRC */
-        uint16_t crc16 = sd_compute_crc16_fast((uint8_t *)buf, SD_SECTOR_SIZE);
-        crc[0] = (crc16>>8) & 0xff;
-        crc[1] = crc16 & 0xff;
-#endif // SD_CRC_DISABLE
-
         /* Send data, except for STOP_TRAN */
         spi_write(spi, buf, SD_SECTOR_SIZE);
 
@@ -905,7 +910,6 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
             /* Write single sector */
             if (sd_send_cmd(spi, CMD24, lba) == 0) {
                 err = sd_write_block(spi, buffer, 0xfe);
-
                 if(err == sdError_OK) {
                     err = sd_check_r2_resp(spi);
                     if(err == sdError_OK) {
@@ -944,7 +948,6 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
                         break;
                     }
                 }
-
             } else {
                 err = sdError_BadResponse;
             }
