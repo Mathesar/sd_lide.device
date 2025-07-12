@@ -296,22 +296,13 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     return sdError_OK;
 }
 
-static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
+static int sd_write_block(spi_t *spi, const uint8_t *buf, uint16_t crc16, uint8_t token)
 {
     uint8_t crc[2];
     uint8_t resp;
 
-#ifndef SD_CRC_DISABLE
-    if (token != 0xfd) {
-        /* compute CRC now as we need to wait for card to get ready anyway*/
-        uint16_t crc16 = sd_compute_crc16_fast((uint8_t *)buf, SD_SECTOR_SIZE);
-        crc[0] = (crc16>>8) & 0xff;
-        crc[1] = crc16 & 0xff;
-    }
-#else
-    crc[0] = 0xff;
-    crc[1] = 0xff;
-#endif // SD_CRC_DISABLE
+    crc[0] = (crc16>>8) & 0xff;
+    crc[1] = crc16 & 0xff;
 
     if (sd_wait_ready(spi) < 0) {
         Warn("Card not ready\n");
@@ -799,6 +790,110 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
         return 0;
 }
 
+/**
+ * ata_write
+ *
+ * Write blocks to the SD card using multiblock write command if possible
+ * @param buffer source buffer
+ * @param lba LBA Address
+ * @param count Number of blocks to transfer
+ * @param unit Pointer to the unit structure
+ * @returns error
+*/
+BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
+{
+    sd_card_info_t *ci = &unit->sd_card_info;
+    spi_t *spi = &unit->sd_card_info.spi;
+    int err = sdError_OK;
+
+    if (ci->type == sdCardType_None) {
+        Warn("No card\n");
+        return IOERR_OPENFAIL;
+    }
+
+#ifndef SD_CRC_DISABLE
+    /* SD cards that do not support CRC are read-only */
+    if(ci->crc_enabled == false)
+    {
+        Warn("CRC not enabled\n");
+        return IOERR_ABORTED;
+    }
+#endif // SD_CRC_DISABLE
+
+    if (ci->type != sdCardType_SDHC) {
+        /* Convert lba to byte addressing (x512) */
+        lba <<= 9;
+    }
+
+    for(int16_t retries=0; retries<MAX_READ_WRITE_RETRIES; retries++) {
+        if (count == 1) {
+            /* Write single sector */
+            if (sd_send_cmd(spi, CMD24, lba) == 0) {
+                uint16_t crc = sd_compute_crc16_fast((uint8_t *)buffer, SD_SECTOR_SIZE);
+                err = sd_write_block(spi, buffer, crc, 0xfe);
+                if(err == sdError_OK) {
+                    err = sd_check_r2_resp(spi);
+                    if(err == sdError_OK) {
+                        /* success! */
+                        break;
+                    }
+                }
+            } else {
+                err = sdError_BadResponse;
+            }
+        } else {
+            /* Write multiple sectors */
+            ULONG block_count  = count;
+            void *block_buffer = buffer;
+            if (sd_send_cmd(spi, CMD25, lba) == 0) {
+                do {
+                    uint16_t crc = sd_compute_crc16_fast((uint8_t *)block_buffer, SD_SECTOR_SIZE);
+                    err = sd_write_block(spi, block_buffer, crc, 0xfc);
+                    if (err != sdError_OK) {
+                        /* when we get an error here it is often due to a spurious (extra) clock cycle
+                        therefore we wiggle CS to re-align before sending STOP_TRAN token*/
+                        sd_send_idle_bytes(spi, 2*SD_SECTOR_SIZE);
+                        sd_deselect(spi);
+                        sd_select(spi);
+                        break;
+                    }
+                    block_buffer += SD_SECTOR_SIZE;
+                } while (--block_count);
+
+                /* always send send STOP_TRAN token */
+                sd_write_block(spi, NULL, 0, 0xfd);
+
+                if(err == sdError_OK) {
+                    err = sd_check_r2_resp(spi);
+                    if(err == sdError_OK) {
+                        /* success! */
+                        break;
+                    }
+                }
+            } else {
+                err = sdError_BadResponse;
+            }
+        }
+
+        /* write error */
+        Warn("SD write error %ld, retrying\n", (long)err);
+
+        /* abort transmission after error, some cards need this */
+        sd_send_cmd(spi,CMD12,0);
+
+        /* clear errors */
+        sd_check_r2_resp(spi);
+    }
+
+    sd_deselect(spi);
+
+    /* return IOERR_ABORTED if error occurred */
+    if(err != sdError_OK)
+        return IOERR_ABORTED;
+    else
+        return 0;
+}
+
 #else
 
 /**
@@ -868,12 +963,10 @@ BYTE ata_read(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
     return IOERR_ABORTED;
 }
 
-#endif // SD_MULTIBLOCK_ENABLE
-
 /**
  * ata_write
  *
- * Write blocks to the SD card using multiblock write command if possible
+ * Write blocks to the SD card using single block write command
  * @param buffer source buffer
  * @param lba LBA Address
  * @param count Number of blocks to transfer
@@ -884,6 +977,9 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
 {
     sd_card_info_t *ci = &unit->sd_card_info;
     spi_t *spi = &unit->sd_card_info.spi;
+    int16_t retries = MAX_READ_WRITE_RETRIES;
+    uint16_t crc = 0xffff;
+    uint16_t crc_next = 0xffff;
     int err = sdError_OK;
 
     if (ci->type == sdCardType_None) {
@@ -898,79 +994,68 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
         Warn("CRC not enabled\n");
         return IOERR_ABORTED;
     }
+
+    /* compute crc of first block */
+    crc = sd_compute_crc16_fast((uint8_t *)buffer, SD_SECTOR_SIZE);
 #endif // SD_CRC_DISABLE
 
-    if (ci->type != sdCardType_SDHC) {
-        /* Convert lba to byte addressing (x512) */
-        lba <<= 9;
-    }
+    do {
+        /* compute sd card address */
+        ULONG sd_address = lba;
+        if (ci->type != sdCardType_SDHC) {
+            /* Convert sd_address to byte addressing (x512) */
+            sd_address <<= 9;
+        }
 
-    for(int16_t retries=0; retries<MAX_READ_WRITE_RETRIES; retries++) {
-        if (count == 1) {
-            /* Write single sector */
-            if (sd_send_cmd(spi, CMD24, lba) == 0) {
-                err = sd_write_block(spi, buffer, 0xfe);
-                if(err == sdError_OK) {
-                    err = sd_check_r2_resp(spi);
-                    if(err == sdError_OK) {
-                        /* success! */
-                        break;
-                    }
+        /* Write single sector */
+        if (sd_send_cmd(spi, CMD24, sd_address) == 0) {
+            err = sd_write_block(spi, buffer, crc, 0xfe);
+            if(err == sdError_OK) {
+#ifndef SD_CRC_DISABLE
+                if(count > 1) {
+                    /* release card so that card starts programming block */
+                    sd_deselect(spi);
+                    /* and compute crc of next block while card is busy */
+                    crc_next = sd_compute_crc16_fast((uint8_t *)(buffer+SD_SECTOR_SIZE), SD_SECTOR_SIZE);
                 }
-            } else {
-                err = sdError_BadResponse;
+#endif // SD_CRC_DISABLE
+                err = sd_check_r2_resp(spi);
+                if(err == sdError_OK) {
+                    /* block written successfully */
+                    if(--count == 0) {
+                        /* all blocks done */
+                        sd_deselect(spi);
+                        return 0;
+                    }
+                    lba++;
+                    buffer += SD_SECTOR_SIZE;
+                    crc = crc_next;
+                    continue;
+                }
             }
         } else {
-            /* Write multiple sectors */
-            ULONG block_count  = count;
-            void *block_buffer = buffer;
-            if (sd_send_cmd(spi, CMD25, lba) == 0) {
-                do {
-                    err = sd_write_block(spi, block_buffer, 0xfc);
-                    if (err != sdError_OK) {
-                        /* when we get an error here it is often due to a spurious (extra) clock cycle
-                        therefore we wiggle CS to re-align before sending STOP_TRAN token*/
-                        sd_send_idle_bytes(spi, 2*SD_SECTOR_SIZE);
-                        sd_deselect(spi);
-                        sd_select(spi);
-                        break;
-                    }
-                    block_buffer += SD_SECTOR_SIZE;
-                } while (--block_count);
-
-                /* always send send STOP_TRAN token */
-                sd_write_block(spi, 0, 0xfd);
-
-                if(err == sdError_OK) {
-                    err = sd_check_r2_resp(spi);
-                    if(err == sdError_OK) {
-                        /* success! */
-                        break;
-                    }
-                }
-            } else {
-                err = sdError_BadResponse;
-            }
+            err = sdError_BadResponse;
         }
 
         /* write error */
-        Warn("SD write error %ld, retrying\n", (long)err);
+        Warn("SD write error %ld, %lu blocks remaining, retrying\n", (long)err, (unsigned long)count);
+        retries--;
 
-        /* abort transmission after error, some cards need this */
-        sd_send_cmd(spi,CMD12,0);
+        /* finish write */
+        sd_send_idle_bytes(spi, 2*SD_SECTOR_SIZE);
 
         /* clear errors */
         sd_check_r2_resp(spi);
-    }
+
+    } while(retries);
 
     sd_deselect(spi);
 
-    /* return IOERR_ABORTED if error occurred */
-    if(err != sdError_OK)
-        return IOERR_ABORTED;
-    else
-        return 0;
+    /* return IOERR_ABORTED */
+    return IOERR_ABORTED;
 }
+
+#endif // SD_MULTIBLOCK_ENABLE
 
 /**
  * ata_set_xfer
