@@ -30,8 +30,8 @@
 _sd_compute_crc16_fast:
                     movem.l     d1-d3/a0-a2,-(sp)           // push on stack
 
-                    lea         .sd_crc_table_high(PC),a1
-                    lea         .sd_crc_table_low(PC),a2
+                    lea         .sd_crc16_table_high(PC),a1
+                    lea         .sd_crc16_table_low(PC),a2
 
                     move.q      #0,d1                       // CRC high
                     move.q      #0,d2                       // CRC low
@@ -65,43 +65,39 @@ _sd_compute_crc16_fast:
                     // computed UBYTE CRC is returned in d0
 
 _sd_compute_crc7_fast:
-                    movem.l     d1-d4/a0,-(sp)              // push on stack
-                    move.q      #0,d2                       // CRC
-                    move.b      #9,d3                       // polynomial
+                    movem.l     d1-d3/a0-a2,-(sp)           // push on stack
+
+                    lea         .sd_crc7_table_high(PC),a1
+                    lea         .sd_crc7_table_low(PC),a2
+
+                    move.q      #0,d1                       // CRC
+
                     bra         .sd_compute_crc7_start
 
-.sd_compute_crc7_lp1:
-					move.b	    (a0)+,d4				    // c = *(data++)
-					move.q      #7,d1                       // do for all bits in a byte
-.sd_compute_crc7_lp2:
-					add.b       d2,d2                       // CRC <<= 1
+.sd_compute_crc7_loop:
+					move.b	    (a0)+,d2				    // c = *(data++)
+					eor.b       d2,d1                       // CRC ^= c
+					move.w      d1,d2
+					and.b       #15,d1
+					move.b      0(a2,d1.w),d3               // fetch low byte from table
+					lsr.b       #4,d2
+					move.b      0(a1,d2.w),d1               // fetch high byte from table
+					eor.b       d3,d1
 
-					btst.b      #7,d4                       // if (c&0x80)
-					beq         .sd_compute_crc7_skip1
-					eor.b       d3,d2                       // CRC ^= polynomial
-.sd_compute_crc7_skip1:
-
-					btst.b      #7,d2                       // if (CRC&0x80)
-					beq         .sd_compute_crc7_skip2
-					eor.b       d3,d2                       // CRC ^= polynomial
-.sd_compute_crc7_skip2:
-
-					add.b       d4,d4                       // c <<= 1
-					dbra		d1,.sd_compute_crc7_lp2
 .sd_compute_crc7_start:
-					dbra		d0,.sd_compute_crc7_lp1
-					add.b       d2,d2                       // CRC <<= 1
-					addq        #1,d2                       // set LSB
+					dbra		d0,.sd_compute_crc7_loop
 
-					move.l      d2,d0                       // result in d0
-					movem.l     (sp)+,d1-d4/a0              // pop from stack
+					or.b        #1,d1                       // CRC is in upper 7 bits, set lower bit
+					move.l      d1,d0                       // result in d0
+
+					movem.l     (sp)+,d1-d3/a0-a2           // pop from stack
                     rts
 
 /**************************************************************************************************/
 /**************************************************************************************************/
 /**************************************************************************************************/
 
-.sd_crc_table_high:
+.sd_crc16_table_high:
                     dc.b 0,16,32,48,64,80,96,112,129,145,161,177,193,209,225,241
                     dc.b 18,2,50,34,82,66,114,98,147,131,179,163,211,195,243,227
                     dc.b 36,52,4,20,100,116,68,84,165,181,133,149,229,245,197,213
@@ -119,7 +115,7 @@ _sd_compute_crc7_fast:
                     dc.b 253,237,221,205,189,173,157,141,124,108,92,76,60,44,28,12
                     dc.b 239,255,207,223,175,191,143,159,110,126,78,94,46,62,14,30
 
-.sd_crc_table_low:
+.sd_crc16_table_low:
                     dc.b 0,33,66,99,132,165,198,231,8,41,74,107,140,173,206,239
                     dc.b 49,16,115,82,181,148,247,214,57,24,123,90,189,156,255,222
                     dc.b 98,67,32,1,230,199,164,133,106,75,40,9,238,207,172,141
@@ -136,3 +132,8 @@ _sd_compute_crc7_fast:
                     dc.b 125,92,63,30,249,216,187,154,117,84,55,22,241,208,179,146
                     dc.b 46,15,108,77,170,139,232,201,38,7,100,69,162,131,224,193
                     dc.b 31,62,93,124,155,186,217,248,23,54,85,116,147,178,209,240
+
+.sd_crc7_table_high:
+                    dc.b 0,50,100,86,200,250,172,158,130,176,230,212,74,120,46,28
+.sd_crc7_table_low:
+                    dc.b 0,18,36,54,72,90,108,126,144,130,180,166,216,202,252,238
