@@ -344,14 +344,6 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
         }
     }
 
-    /* Select the card and wait for ready except for abort */
-    if (cmd != CMD12) {
-        sd_deselect(spi);
-        if (sd_select(spi) < 0) {
-            return 0xff;
-        }
-    }
-
     /* Build command */
     buf[0] = 0x40 | cmd;
     buf[1] = (uint8_t)(arg >> 24);
@@ -359,6 +351,14 @@ static uint8_t sd_send_cmd(spi_t *spi, uint8_t cmd, uint32_t arg)
     buf[3] = (uint8_t)(arg >> 8);
     buf[4] = (uint8_t)(arg >> 0);
     buf[5] = sd_compute_crc7_fast(buf, 5);
+
+    /* Select the card and wait for ready except for abort */
+    if (cmd != CMD12) {
+        sd_deselect(spi);
+        if (sd_select(spi) < 0) {
+            return 0xff;
+        }
+    }
 
     /* send command */
     spi_write(spi, buf, sizeof(buf));
