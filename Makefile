@@ -67,7 +67,8 @@ all:	$(ROM) \
 		lide-N2630-high.rom \
 		lide-N2630-low.rom \
 		AIDE-$(PROJECT) \
-		SD-$(PROJECT)
+		SD-$(PROJECT) \
+		SD_Test
 
 
 OBJ = 	device.o \
@@ -94,7 +95,10 @@ AIDE-$(PROJECT): $(SRCS)
 	${CC} -o $@ $(CFLAGS) -DCDBOOT=1 -DSIMPLE_IDE=1 $(SRCS) bootblock.S $(LDFLAGS)
 
 SD-$(PROJECT): $(SRCS)
-	${CC} -o $@ $(CFLAGS) -DSD_DRIVER=1 device.c sd.c scsi.c idetask.c lide_alib.c mounter.c debug.c timer.c spi.c spi_low.S endskip.S bootblock.S $(LDFLAGS)
+	${CC} -o $@ $(CFLAGS) -DSD_DRIVER=1 device.c sd.c sd_crc.S scsi.c idetask.c lide_alib.c mounter.c debug.c timer.c spi.c spi_low.S endskip.S bootblock.S $(LDFLAGS)
+
+SD_Test: $(SRCS)
+	${CC} -o $@ -DDEBUG=23 -DSD_DRIVER=1 sd_test.c timer.c sd.c sd_crc_slow.c sd_crc.S spi.c spi_low.S
 
 lideflash/lideflash:
 	make -C lideflash
@@ -157,6 +161,7 @@ clean:
 	-rm -f $(PROJECT)
 	-rm -f AIDE-$(PROJECT)
 	-rm -f SD-$(PROJECT)
+	-rm -f SD_Test
 	make -C bootrom clean
 	make -C lideflash clean
 	make -C lidetool clean

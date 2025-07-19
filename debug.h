@@ -6,31 +6,52 @@
 #define DBG_WARN  2
 #define DBG_TRACE 4
 #define DBG_CMD   8
+#define DBG_CLI   16
 
 #if DEBUG
-#include <clib/debug_protos.h>
+    #if DEBUG & DBG_CLI
+        #include <stdio.h>
+    #else
+        #include <clib/debug_protos.h>
+    #endif
 #endif
 
 #if DEBUG & DBG_INFO
-#define Info KPrintF
+    #if DEBUG & DBG_CLI
+        #define Info printf
+    #else
+        #define Info KPrintF
+    #endif
 #else
-#define Info
+    #define Info
 #endif
 
 #if DEBUG & DBG_WARN
-#define Warn KPrintF
+    #if DEBUG & DBG_CLI
+        #define Warn printf
+    #else
+        #define Warn KPrintF
+    #endif
 #else
-#define Warn
+    #define Warn
 #endif
 
 #if DEBUG & DBG_TRACE
-#define Trace KPrintF
+    #if DEBUG & DBG_CLI
+        #define Trace printf
+    #else
+        #define Trace KPrintF
+    #endif
 #else
-#define Trace
+    #define Trace
 #endif
 
 #if DEBUG & DBG_CMD
-void traceCommand(struct IOStdReq *req);
+    #if DEBUG & DBG_CLI
+        #define traceCommand
+    #else
+        void traceCommand(struct IOStdReq *req);
+    #endif
 #else
-#define traceCommand
+    #define traceCommand
 #endif
