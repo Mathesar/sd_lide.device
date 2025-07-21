@@ -21,22 +21,23 @@
 This is a feature complete, autobooting device driver for an SD-card connected to the [a500-simple-spi-hardware](https://github.com/Mathesar/a500-simple-spi-hardware) SPI controller. 
 This driver has been built upon the hard work of others, (see [Acknowledgements](#acknowledgements)) but I added some features to make the driver as reliable as possible.
 
-SD-cards have a bad reputation for reliability. I believe at least part of it is due to badly designed interfaces. Modern SD-cards have extremely high-speed electrical interfaces designed to transfer hundreds of megabytes per second. One cannot expect these interfaces to work correctly via a cheap interface board connected via some dupont patch wires. Especially not if installed in an aging 80's computer where the metal shielding has been removed to make room for all kind of modern add-on's.
-Therefore, I added some features to the SD-card driver to handle any transfer errors that might occur due to bad signal integrity or external electrical disturbances.
+SD-cards have a bad reputation for reliability. I believe at least part of it is due to badly designed interfaces. I experienced this first hand when working with the [a500-simple-spi-hardware](https://github.com/Mathesar/a500-simple-spi-hardware). Modern SD-cards have extremely high-speed electrical interfaces designed to transfer hundreds of megabytes per second. One cannot expect these interfaces to work correctly over a cheap interface board (ofen badly designed too!) connected with dupont patch wires. Apart from signal integrity issues, these wires also act as antennas picking up electrical noise that can corrupt the data transfer. This is especially true if installed in an aging 80's computer where the metal shielding has been removed to make room for all kind of modern add-ons. 
+Therefore, I added some features to the SD-card driver to handle any transfer errors that might occur because of this.
 
 These features are:
-* full CRC check on all data read from or written to the card.
+* full CRC check on all data and commands read from or written to the card.
 * full handling of any errors reported by the card
 * Automatic retry of failed read or write commands.
+* Writes attempty to cards that do not support CRC (some older MMC cards are like this) are blocked to prevent data corruption.
 
-These features make the driver slow but very robust. I have done extensive tests with several brands of SD-cards by coupling external electrical noise into the dupont wires and the driver always recovered without data loss.
+These features make the driver slower but very reliable. I have done extensive tests with several brands of SD-cards by intentionally coupling electrical noise into the dupont wires and the driver always recovered without data loss.
 
 # Supported hardware
-sd-lide.device supports the following devices:
+sd-lide.device currently only supports the following device:
 * [a500-simple-spi-hardware](https://github.com/Mathesar/a500-simple-spi-hardware)
 
 This driver needs to be loaded from floppy using [loadmodule](https://aminet.net/package/util/boot/LoadModule). Alternatively, it can be "burned" to a custom Kickstart ROM. This is my preferred way of using this driver.
-The driver is small enough that it fits in standard 512Kb 3.1ROM if the scsi.device, card.resource and carddisk.device are removed as these modules are not used on an A500.
+The driver is small enough that it fits in standard 512Kb 3.1 ROM when scsi.device, card.resource and carddisk.device are removed. These modules are not used anyway on an A500.
 
 # Downloads
 Device downloads are available under [releases](https://github.com/Mathesar/sd_lide.device/releases)
