@@ -522,82 +522,82 @@ bool ata_init_unit(struct IDEUnit *unit)
     for (int retries = 0; retries < RESET_MAX_RETRIES; retries++) {
         timer_wait(TIMER_MILLIS(RESET_DELAY_MS));
         if (sd_send_cmd(spi, CMD0, 0) == 1) {
-            break;
-        }
-    }
-
 #ifndef SD_CRC_DISABLE
-    /* enable CRC */
-    if((sd_send_cmd(spi, CMD59, 1)&0xfe) == 0) {
-        ci->crc_enabled = true;
-    } else {
-         Warn("Failed to enable CRC\n");
-    }
+            /* enable CRC */
+            if((sd_send_cmd(spi, CMD59, 1)&0xfe) == 0) {
+                ci->crc_enabled = true;
+            } else {
+                 Warn("Failed to enable CRC\n");
+            }
 #endif // SD_CRC_DISABLE
 
-    if (sd_send_cmd(spi, CMD8, 0x1aa) == 1) {
-        /* SDv2 */
-        uint32_t ocr = sd_get_r7_resp(spi);
+            if (sd_send_cmd(spi, CMD8, 0x1aa) == 1) {
+                /* SDv2 */
+                uint32_t ocr = sd_get_r7_resp(spi);
 
-        if (ocr == 0x000001aa) {
-            Trace("SDv2 - R7 resp = 0x%08lX\n", (unsigned long) ocr);
-            ci->type = sdCardType_SD2_0;
+                if (ocr == 0x000001aa) {
+                    Trace("SDv2 - R7 resp = 0x%08lX\n", (unsigned long) ocr);
+                    ci->type = sdCardType_SD2_0;
 
-            /* Wait for card ready */
-            timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
-            while (sd_send_cmd(spi, ACMD41, (1ul << 30)) > 0) {
-                if (timer_check(timeout)) {
-                    /* Init timed out - invalidate card */
-                    Warn("Init timed out\n");
-                    ci->type = sdCardType_None;
-                    break;
-                }
-            }
-
-            if (ci->type) {
-                /* Read OCR */
-                if (sd_send_cmd(spi, CMD58, 0) == 0) {
-                    ocr = sd_get_r7_resp(spi);
-                    if (ocr & (1ul << 30)) {
-                        /* Card is high capacity */
-                        Trace("SDHC\n");
-                        ci->type = sdCardType_SDHC;
+                    /* Wait for card ready */
+                    timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
+                    while (sd_send_cmd(spi, ACMD41, (1ul << 30)) > 0) {
+                        if (timer_check(timeout)) {
+                            /* Init timed out - invalidate card */
+                            Warn("Init timed out\n");
+                            ci->type = sdCardType_None;
+                            break;
+                        }
                     }
+
+                    if (ci->type) {
+                        /* Read OCR */
+                        if (sd_send_cmd(spi, CMD58, 0) == 0) {
+                            ocr = sd_get_r7_resp(spi);
+                            if (ocr & (1ul << 30)) {
+                                /* Card is high capacity */
+                                Trace("SDHC\n");
+                                ci->type = sdCardType_SDHC;
+                            }
+                        } else {
+                            Warn("Failed to read OCR\n");
+                            ci->type = sdCardType_None;
+                        }
+                    }
+                }
+            } else {
+                /* Not SDv2, check SDv1 or MMCv3  */
+                if (sd_send_cmd(spi, ACMD41, 0) <= 1) {
+                    Trace("SDv1\n");
+                    ci->type = sdCardType_SD1_x;
+                    cmd = ACMD41;
                 } else {
-                    Warn("Failed to read OCR\n");
-                    ci->type = sdCardType_None;
+                    Trace("MMCv3\n");
+                    ci->type = sdCardType_MMC;
+                    cmd = CMD1;
+                }
+
+                /* Wait for card ready */
+                timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
+                while (sd_send_cmd(spi, cmd, 0) > 0) {
+                    if (timer_check(timeout)) {
+                        /* Init timed out - invalidate card */
+                        Warn("Init timed out\n");
+                        ci->type = sdCardType_None;
+                        break;
+                    }
+                }
+
+                if (ci->type) {
+                    /* Set block length */
+                    if (sd_send_cmd(spi, CMD16, SD_SECTOR_SIZE) > 0) {
+                        Warn("Failed to set block length\n");
+                        ci->type = sdCardType_None;
+                    }
                 }
             }
-        }
-    } else {
-        /* Not SDv2, check SDv1 or MMCv3  */
-        if (sd_send_cmd(spi, ACMD41, 0) <= 1) {
-            Trace("SDv1\n");
-            ci->type = sdCardType_SD1_x;
-            cmd = ACMD41;
-        } else {
-            Trace("MMCv3\n");
-            ci->type = sdCardType_MMC;
-            cmd = CMD1;
-        }
 
-        /* Wait for card ready */
-        timeout = timer_set(TIMER_MILLIS(INIT_TIMEOUT_MS));
-        while (sd_send_cmd(spi, cmd, 0) > 0) {
-            if (timer_check(timeout)) {
-                /* Init timed out - invalidate card */
-                Warn("Init timed out\n");
-                ci->type = sdCardType_None;
-                break;
-            }
-        }
-
-        if (ci->type) {
-            /* Set block length */
-            if (sd_send_cmd(spi, CMD16, SD_SECTOR_SIZE) > 0) {
-                Warn("Failed to set block length\n");
-                ci->type = sdCardType_None;
-            }
+        break;
         }
     }
 
@@ -635,6 +635,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     } else {
         /* Card not present */
         err = sdError_NoCard;
+        Info("No card\n");
     }
 
     sd_deselect(spi);
