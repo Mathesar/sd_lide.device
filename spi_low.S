@@ -16,14 +16,14 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-        XDEF        _spi_chip_select
+        XDEF        _spi_wr_select_reg
         XDEF        _spi_read_fast
         XDEF        _spi_write_fast
 
 // SPI controller commands
 .equ                CMD_NOP,        0x00
 .equ                CMD_CONTROL,    0x20
-.equ                CMD_SELECT,     0xb1
+.equ                CMD_SELECT,     0x40
 .equ                CMD_CRC_SOURCE, 0x60
 .equ                CMD_READ,       0x80
 .equ                CMD_WRITE,      0xa0
@@ -31,24 +31,12 @@
 
 /**************************************************************************************************/
 
-                    // a1 = pointer to I/O port
-
-_spi_wait_ready:    move.l	    d0,-(sp)					// push on stack
-                    moveq       #32,d0                      // max 32 retries
-.spi_wait_ready_lp: tst.b       (a0)
-                    bpl         .spi_wait_ready_ok
-                    dbra        d0,.spi_wait_ready_lp
-.spi_wait_ready_ok: move.l  	(sp)+,d0					// pop from stack
-                    rts
-
-/**************************************************************************************************/
-
 					// a1 = pointer to I/O port
                     // d0 = UBYTE select
 
-_spi_chip_select:   bsr         _spi_wait_ready             // wait for controller ready
-					move.b      #CMD_SELECT,(a1)            // set chip select
-					move.b	    d0,(a1)
+_spi_wr_select_reg: andi.b      #7,d0
+                    add.b       #CMD_SELECT,d0
+                    move.b      d0,(a1)                     // set chip select register
                     rts
 
 /**************************************************************************************************/
@@ -80,6 +68,7 @@ _spi_write_slow:    movem.l     d1-d2,-(sp)                 // push on stack
                     // d0 = UWORD size
 
 _spi_write_fast:    movem.l     d1-d2,-(sp)                 // push on stack
+                    move.b      #(CMD_CONTROL+2),(a1)       // speed = TURBO
                     move.b      #CMD_WRITE,(a1)             // go to WRITE state
 
 .write_align_lp:    tst.w       d0                          // align to long word boundary
@@ -118,10 +107,11 @@ _spi_write_fast:    movem.l     d1-d2,-(sp)                 // push on stack
 					// a1 = pointer to I/O port
 					// d0 = UWORD size
 
-_spi_read_fast:		movem.l     d1-d2,-(sp)                 // push on stack
+_spi_read_fast:     movem.l     d1-d2,-(sp)                 // push on stack
                     tst.w       d0                          // check size>0
                     beq         .read_done
 
+                    move.b      #(CMD_CONTROL+2),(a1)       // speed = TURBO
                     move.b      #CMD_WRITE,(a1)             // go to WRITE state
                     move.b      #0xff,(a1)                  // shift in first byte
                     move.b      (a1),d1                     // return to IDLE state

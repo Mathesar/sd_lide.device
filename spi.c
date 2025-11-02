@@ -22,7 +22,7 @@
 #include <string.h>
 
 //assembly functions
-extern void spi_chip_select(UBYTE select asm("d0"), UBYTE *port asm("a1"));
+extern void spi_wr_select_reg(UBYTE select asm("d0"), UBYTE *port asm("a1"));
 extern void spi_read_fast(UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
 extern void spi_write_fast(const UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
 
@@ -54,14 +54,14 @@ void spi_release(spi_t *spi)
 void spi_select(spi_t *spi)
 {
 	//assert chipselect
-	spi_chip_select(spi->channel, (UBYTE *)(SSPI_BASE_ADDRESS));
+	spi_wr_select_reg(spi->channel, (UBYTE *)(SSPI_BASE_ADDRESS));
 }
 
 //deselect the channel (de-assert chip_select)
 void spi_deselect()
 {
 	//de-assert chipselect
-	spi_chip_select(0x00, (UBYTE *)(SSPI_BASE_ADDRESS));
+	spi_wr_select_reg(0x00, (UBYTE *)(SSPI_BASE_ADDRESS));
 }
 
 //sets the speed of the SPI bus
@@ -70,60 +70,23 @@ void spi_set_speed(spi_t *spi, UBYTE speed)
 	spi->speed = speed;
 }
 
-// A slow SPI transfer takes 32 us (8 bits times 4us (250kHz))
-// An E-cycle is 1.4 us.
-static void wait_40_us()
-{
-    volatile UBYTE *cia_b_pra = (volatile UBYTE *)0xbfd000;
-    volatile UBYTE tmp;
-
-	for (int i = 0; i < 32; i++)
-		tmp = *cia_b_pra;
-}
-
-//slowed down write
-static void spi_write_slow(const UBYTE *buf asm("a0"), UWORD size asm("d0"))
-{
-	for (UWORD i = 0; i < size; i++)
-	{
-		spi_write_fast(buf++, 1, (UBYTE *)(SSPI_BASE_ADDRESS+1));
-		wait_40_us();
-	}
-}
-
-//slowed down read
-static void spi_read_slow(UBYTE *buf asm("a0"), UWORD size asm("d0"))
-{
-	for (UWORD i = 0; i < size; i++)
-	{
-		spi_read_fast(buf++, 1, (UBYTE *)(SSPI_BASE_ADDRESS+1));
-		wait_40_us();
-	}
-}
-
 //read <size> bytes from the SPI bus into <buf>
 void spi_read(spi_t *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"))
 {
-	if (spi->speed == SPI_SPEED_FAST)
-		spi_read_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
-	else
-		spi_read_slow(buf, size);
+    spi_read_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
 }
 
 //write <size> bytes from <buf> to the SPI bus
 void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"))
 {
-	if (spi->speed == SPI_SPEED_FAST)
-		spi_write_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
-	else
-		spi_write_slow(buf, size);
+    spi_write_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
 }
 
 //initialize SPI hardware, <channel> sets chipselect to use
 int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 {
 	//assert channel
-	if(channel!=SPI_CHANNEL_1 && channel!=SPI_CHANNEL_2)
+	if(channel!=SPI_CHANNEL_1 && channel!=SPI_CHANNEL_2 && channel!=SPI_CHANNEL_3)
 		return -1;
 
 	//open sspi resource
@@ -143,7 +106,7 @@ int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 		sspi->node.ln_Type = NT_RESOURCE;
 		sspi->node.ln_Pri = 0;
 		sspi->node.ln_Name = sspi->name;
-		sspi->Version = 1;
+		sspi->Version = 2;
 		sspi->Revision = 0;
 
 		//add resource to the system

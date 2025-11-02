@@ -22,13 +22,15 @@
 
 #include <exec/exec.h>
 
-#define SSPI_BASE_ADDRESS	0x00EC0000
+#define SSPI_BASE_ADDRESS	0x00BFEB01
 
-#define SPI_SPEED_SLOW 		0
-#define SPI_SPEED_FAST 		1
+#define SPI_SPEED_SLOW 		0x00
+#define SPI_SPEED_MEDIUM    0x01
+#define SPI_SPEED_FAST 		0x02
 
 #define SPI_CHANNEL_1		0x01
 #define SPI_CHANNEL_2		0x02
+#define SPI_CHANNEL_3		0x04
 
 #define SSPI_RESOURCE_NAME	"sspi"
 
