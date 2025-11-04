@@ -17,8 +17,10 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         XDEF        _spi_wr_select_reg
-        XDEF        _spi_read_fast
         XDEF        _spi_write_fast
+        XDEF        _spi_write_slow
+        XDEF        _spi_read_fast
+        XDEF        _spi_read_slow
 
 // SPI controller commands
 .equ                CMD_NOP,        0x00
@@ -37,28 +39,6 @@
 _spi_wr_select_reg: andi.b      #7,d0
                     add.b       #CMD_SELECT,d0
                     move.b      d0,(a1)                     // set chip select register
-                    rts
-
-/**************************************************************************************************/
-
- 					// a0 = UBYTE *buf
-					// a1 = pointer to I/O port
-                    // d0 = UWORD size
-
-_spi_write_slow:    movem.l     d1-d2,-(sp)                 // push on stack
-                    move.b      #CMD_WRITE,(a1)             // go to WRITE state
-                    bra         .spi_wr_slow_start
-
-.spi_wr_slow_loop:  move.b      (a0)+,(a1)                  // write byte and shift out
-                    moveq       #32,d1
-.spi_wr_slow_busy:  subq.w      #1,d1
-                    beq         .spi_wr_slow_error
-                    tst.b       (a1)
-                    bmi         .spi_wr_slow_busy
-.spi_wr_slow_start: dbra        d0,.spi_wr_slow_loop
-
-.spi_wr_slow_error: move.b      (a1),d0                     // return to IDLE state
-                    movem.l     (sp)+,d1-d2                 // pop from stack
                     rts
 
 /**************************************************************************************************/
@@ -97,8 +77,30 @@ _spi_write_fast:    movem.l     d1-d2,-(sp)                 // push on stack
 .write_remainder_lp:move.b      (a0)+,(a1)                  // write byte and shift out
 .write_remainder:   dbra        d0,.write_remainder_lp      // loop until all bytes done
 
-                    move.b      (a1),d0                     // return to IDLE state
+                    move.b      (a1),d1                     // return to IDLE state
                     movem.l     (sp)+,d1-d2                 // pop from stack
+                    rts
+
+/**************************************************************************************************/
+
+ 					// a0 = UBYTE *buf
+					// a1 = pointer to I/O port
+                    // d0 = UWORD size
+
+_spi_write_slow:    movem.l     d1-d2,-(sp)                 // push on stack
+                    bra         .write_slow_start
+
+.write_slow_loop:   move.b      #CMD_WRITE,(a1)             // go to WRITE state
+                    move.b      (a0)+,(a1)                  // write byte and shift out
+                    move.b      (a1),d1                     // return to IDLE state
+                    moveq       #32,d1                      // wait for controller ready with timeout
+.write_slow_busy:   subq.w      #1,d1
+                    beq         .write_slow_error
+                    tst.b       (a1)
+                    bmi         .write_slow_busy
+.write_slow_start:  dbra        d0,.write_slow_loop         // loop until all bytes done
+
+.write_slow_error:  movem.l     (sp)+,d1-d2                 // pop from stack
                     rts
 
 /**************************************************************************************************/
@@ -112,11 +114,10 @@ _spi_read_fast:     movem.l     d1-d2,-(sp)                 // push on stack
                     beq         .read_done
 
                     move.b      #(CMD_CONTROL+2),(a1)       // speed = TURBO
-                    move.b      #CMD_WRITE,(a1)             // go to WRITE state
-                    move.b      #0xff,(a1)                  // shift in first byte
-                    move.b      (a1),d1                     // return to IDLE state
-                    subq        #1,d0                       // decrement size
+
                     move.b      #CMD_READ,(a1)              // go to READ state
+                    move.b      (a1),d1                     // read dummy and shift in first byte
+                    subq        #1,d0                       // decrement size
 
 .read_align_lp:     tst.w       d0                          // align to long word boundary
                     beq         .read_remainder
@@ -149,3 +150,34 @@ _spi_read_fast:     movem.l     d1-d2,-(sp)                 // push on stack
 
 .read_done:         movem.l     (sp)+,d1-d2                 // pop from stack
                     rts
+
+/**************************************************************************************************/
+
+                    // a0 = UBYTE *buf
+					// a1 = pointer to I/O port
+                    // d0 = UWORD size
+
+_spi_read_slow:     movem.l     d1,-(sp)                    // push on stack
+
+                    move.b      #CMD_READ,(a1)              // go to READ state
+                    move.b      (a1),d1                     // read dummy and shift in first byte
+                    subq        #1,d0                       // decrement size
+                    bra         .read_slow_start
+
+.read_slow_loop:    move.b      #CMD_READ,(a1)              // go to READ state
+                    move.b      (a1),(a0)+                  // read byte and shift in next
+.read_slow_start:   move.b      d0,(a1)                     // return to IDLE state
+                    moveq       #32,d1                      // wait for controller ready with timeout
+.read_slow_busy:    subq.w      #1,d1
+                    beq         .read_slow_error
+                    tst.b       (a1)
+                    bmi         .read_slow_busy
+                    dbra        d0,.read_slow_loop          // loop until all bytes done
+
+.read_slow_error:   move.b      #CMD_WRITE,(a1)             // go to WRITE state
+                    move.b      (a1),(a0)+                  // read last byte from buffer and return to IDLE state
+
+                    movem.l     (sp)+,d1                    // pop from stack
+                    rts
+
+/**************************************************************************************************/
