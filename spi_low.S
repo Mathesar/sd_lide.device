@@ -33,16 +33,24 @@
 
 /**************************************************************************************************/
 
+					// Set chip select and also initialize controller
 					// a1 = pointer to I/O port
                     // d0 = UBYTE select
 
-_spi_wr_select_reg: andi.b      #7,d0
+_spi_wr_select_reg: move.l      d1,-(sp)
+
+                    move.b      (a1),d1                     // controller INIT sequence
+                    move.b      #CMD_NOP,(a1)               // controller INIT sequence
+                    andi.b      #7,d0
                     add.b       #CMD_SELECT,d0
                     move.b      d0,(a1)                     // set chip select register
+
+                    move.l      (sp)+,d1
                     rts
 
 /**************************************************************************************************/
 
+					// Write data to SPI bus with highest clockrate
 					// a0 = UBYTE *buf
 					// a1 = pointer to I/O port
                     // d0 = UWORD size
@@ -54,7 +62,7 @@ _spi_write_fast:    movem.l     d1-d2,-(sp)                 // push on stack
 .write_align_lp:    tst.w       d0                          // align to long word boundary
                     beq         .write_remainder
                     move.w	    a0,d1
-                    and.w       #3,d1
+                    andi.w      #3,d1
                     beq         .write_block
 					move.b      (a0)+,(a1)                  // write byte and shift out
                     dbra        d0,.write_align_lp
@@ -83,11 +91,13 @@ _spi_write_fast:    movem.l     d1-d2,-(sp)                 // push on stack
 
 /**************************************************************************************************/
 
+ 					// Write data to SPI bus with slow clockrates
  					// a0 = UBYTE *buf
 					// a1 = pointer to I/O port
                     // d0 = UWORD size
 
-_spi_write_slow:    movem.l     d1-d2,-(sp)                 // push on stack
+_spi_write_slow:    move.l      d1,-(sp)                    // push on stack
+                    move.b      #CMD_CONTROL,(a1)           // lowest speed
                     bra         .write_slow_start
 
 .write_slow_loop:   move.b      #CMD_WRITE,(a1)             // go to WRITE state
@@ -100,11 +110,12 @@ _spi_write_slow:    movem.l     d1-d2,-(sp)                 // push on stack
                     bmi         .write_slow_busy
 .write_slow_start:  dbra        d0,.write_slow_loop         // loop until all bytes done
 
-.write_slow_error:  movem.l     (sp)+,d1-d2                 // pop from stack
+.write_slow_error:  move.l      (sp)+,d1                    // pop from stack
                     rts
 
 /**************************************************************************************************/
 
+					// Read data from SPI bus with highest clockrate
 					// a0 = UBYTE *buf
 					// a1 = pointer to I/O port
 					// d0 = UWORD size
@@ -117,12 +128,12 @@ _spi_read_fast:     movem.l     d1-d2,-(sp)                 // push on stack
 
                     move.b      #CMD_READ,(a1)              // go to READ state
                     move.b      (a1),d1                     // read dummy and shift in first byte
-                    subq        #1,d0                       // decrement size
+                    subq.w      #1,d0                       // decrement size
 
 .read_align_lp:     tst.w       d0                          // align to long word boundary
                     beq         .read_remainder
                     move.w	    a0,d1
-                    and.w       #3,d1
+                    andi.w      #3,d1
                     beq         .read_block
 					move.b      (a1),(a0)+                  // read byte and shift in next
                     dbra        d0,.read_align_lp
@@ -153,11 +164,13 @@ _spi_read_fast:     movem.l     d1-d2,-(sp)                 // push on stack
 
 /**************************************************************************************************/
 
+                    // Read data from SPI bus with slow clockrates
                     // a0 = UBYTE *buf
 					// a1 = pointer to I/O port
                     // d0 = UWORD size
 
-_spi_read_slow:     movem.l     d1,-(sp)                    // push on stack
+_spi_read_slow:     move.l      d1,-(sp)                    // push on stack
+                    move.b      #CMD_CONTROL,(a1)           // lowest speed
 
                     move.b      #CMD_READ,(a1)              // go to READ state
                     move.b      (a1),d1                     // read dummy and shift in first byte
@@ -176,8 +189,7 @@ _spi_read_slow:     movem.l     d1,-(sp)                    // push on stack
 
 .read_slow_error:   move.b      #CMD_WRITE,(a1)             // go to WRITE state
                     move.b      (a1),(a0)+                  // read last byte from buffer and return to IDLE state
-
-                    movem.l     (sp)+,d1                    // pop from stack
+                    move.l      (sp)+,d1                    // pop from stack
                     rts
 
 /**************************************************************************************************/
