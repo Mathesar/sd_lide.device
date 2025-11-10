@@ -16,7 +16,7 @@
 #define NO_AUTOCONFIG
 
 //keep device.c happy, it needs an address to populate a fake ConfigDev
-#define BOARD_BASE                  SSPI_BASE_ADDRESS
+#define BOARD_BASE                  SD_PLUS_BASE_ADDRESS
 
 //offsets into ATA identify result
 #define ata_identify_serial         10
