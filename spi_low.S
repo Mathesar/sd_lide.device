@@ -21,6 +21,8 @@
         XDEF        _spi_write_slow
         XDEF        _spi_read_fast
         XDEF        _spi_read_slow
+        XDEF        _spi_crc_rst_src
+        XDEF        _spi_crc_result
 
 // SPI controller commands
 .equ                CMD_NOP,        0x00
@@ -33,19 +35,42 @@
 
 /**************************************************************************************************/
 
-					// Set chip select and also initialize controller
+					// Set chip select and initialize controller
 					// a1 = pointer to I/O port
-                    // d0 = UBYTE select
+                    // d0 = UBYTE chip select
 
 _spi_wr_select_reg: move.l      d1,-(sp)
 
                     move.b      (a1),d1                     // controller INIT sequence
                     move.b      #CMD_NOP,(a1)               // controller INIT sequence
                     andi.b      #7,d0
-                    add.b       #CMD_SELECT,d0
+                    addi.b      #CMD_SELECT,d0
                     move.b      d0,(a1)                     // set chip select register
 
                     move.l      (sp)+,d1
+                    rts
+
+/**************************************************************************************************/
+
+					// Reset CRC generator and select source
+					// a1 = pointer to I/O port
+                    // d0 = UBYTE source select
+
+_spi_crc_rst_src:   andi.b      #1,d0
+                    addi.b      #CMD_CRC_SOURCE,d0
+                    move.b      d0,(a1)
+                    rts
+
+/**************************************************************************************************/
+
+                    // Read CRC generator
+                    // a1 = pointer to I/O port
+                    // UWORD CRC is returned in d0
+
+_spi_crc_result:    move.b      #CMD_CRC,(a1)
+                    move.b      (a1),d0                     // read CRC high byte
+                    lsl.w       #8,d0
+                    move.b      (a1),d0                     // read CRC low byte
                     rts
 
 /**************************************************************************************************/

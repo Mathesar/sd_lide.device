@@ -22,20 +22,20 @@
 
 #include <exec/exec.h>
 
-#define SSPI_BASE_ADDRESS	0x00BFEB01
+#define SD_PLUS_BASE_ADDRESS    0x00BFEB01
 
-#define SPI_SPEED_SLOW 		0x00
-#define SPI_SPEED_MEDIUM    0x01
-#define SPI_SPEED_FAST 		0x02
+#define SPI_SPEED_SLOW 		    0x00
+#define SPI_SPEED_MEDIUM        0x01
+#define SPI_SPEED_FAST 		    0x02
 
-#define SPI_CHANNEL_1		0x01
-#define SPI_CHANNEL_2		0x02
-#define SPI_CHANNEL_3		0x04
+#define SPI_CHANNEL_1		    0x01
+#define SPI_CHANNEL_2		    0x02
+#define SPI_CHANNEL_3		    0x04
 
-#define SSPI_RESOURCE_NAME	"sspi"
+#define SPI_RESOURCE_NAME	    "sd-plus"
 
-//sspi resource
-struct sspi_resource_TYPE
+//spi resource
+struct spi_resource_TYPE
 {
 	struct Node	node;
 	UBYTE                       pad1;
@@ -45,13 +45,13 @@ struct sspi_resource_TYPE
     UWORD                       Version;
     UWORD                       Revision;
     struct SignalSemaphore      semaphore;
-	char                        name[sizeof(SSPI_RESOURCE_NAME)];
+	char                        name[sizeof(SPI_RESOURCE_NAME)];
 };
 
 //spi channel structure
 typedef struct
 {
-    struct sspi_resource_TYPE   *sspi;      // pointer to the SSPI resource
+    struct spi_resource_TYPE    *resource;  // pointer to the SPI resource
     struct ExecBase             *SysBase;   // pointer to Exec/SysBase
     UBYTE                       speed;      // bus speed
     UBYTE                       bus_taken;  // bus status

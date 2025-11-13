@@ -23,8 +23,13 @@
 
 //assembly functions
 extern void spi_wr_select_reg(UBYTE select asm("d0"), UBYTE *port asm("a1"));
+
 extern void spi_read_fast(UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
+extern void spi_read_slow(UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
 extern void spi_write_fast(const UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
+extern void spi_write_slow(const UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
+extern void _spi_crc_rst_src(UWORD size asm("d0"), UBYTE *port asm("a1"));
+extern UWORD spi_crc_result(UBYTE *port asm("a1"));
 
 //obtain the bus
 void spi_obtain(spi_t *spi)
@@ -33,7 +38,7 @@ void spi_obtain(spi_t *spi)
 
 	if(!spi->bus_taken)
 	{
-		ObtainSemaphore(&spi->sspi->semaphore);
+		ObtainSemaphore(&spi->resource->semaphore);
 		spi->bus_taken = 1;
 	}
 }
@@ -45,7 +50,7 @@ void spi_release(spi_t *spi)
 
 	if(spi->bus_taken)
 	{
-		ReleaseSemaphore(&spi->sspi->semaphore);
+		ReleaseSemaphore(&spi->resource->semaphore);
 		spi->bus_taken = 0;
 	}
 }
@@ -54,14 +59,14 @@ void spi_release(spi_t *spi)
 void spi_select(spi_t *spi)
 {
 	//assert chipselect
-	spi_wr_select_reg(spi->channel, (UBYTE *)(SSPI_BASE_ADDRESS));
+	spi_wr_select_reg(spi->channel, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 }
 
 //deselect the channel (de-assert chip_select)
 void spi_deselect()
 {
 	//de-assert chipselect
-	spi_wr_select_reg(0x00, (UBYTE *)(SSPI_BASE_ADDRESS));
+	spi_wr_select_reg(0x00, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 }
 
 //sets the speed of the SPI bus
@@ -73,13 +78,19 @@ void spi_set_speed(spi_t *spi, UBYTE speed)
 //read <size> bytes from the SPI bus into <buf>
 void spi_read(spi_t *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"))
 {
-    spi_read_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
+    if(spi->speed == SPI_SPEED_FAST)
+        spi_read_fast(buf, size, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
+    else
+        spi_read_slow(buf, size, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 }
 
 //write <size> bytes from <buf> to the SPI bus
 void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"))
 {
-    spi_write_fast(buf, size, (UBYTE *)(SSPI_BASE_ADDRESS+1));
+     if(spi->speed == SPI_SPEED_FAST)
+        spi_write_fast(buf, size, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
+     else
+        spi_write_slow(buf, size, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 }
 
 //initialize SPI hardware, <channel> sets chipselect to use
@@ -90,31 +101,31 @@ int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 		return -1;
 
 	//open sspi resource
-	struct sspi_resource_TYPE *sspi = OpenResource(SSPI_RESOURCE_NAME);
+	struct spi_resource_TYPE *spi_resource = OpenResource(SPI_RESOURCE_NAME);
 
 	//create resource if it does not exist yet
-	if(sspi == NULL)
+	if(spi_resource == NULL)
 	{
 		//allocate memory for resource
-		sspi = AllocMem(sizeof(struct sspi_resource_TYPE), MEMF_PUBLIC|MEMF_CLEAR);
-		if(sspi == NULL)
+		spi_resource = AllocMem(sizeof(struct spi_resource_TYPE), MEMF_PUBLIC|MEMF_CLEAR);
+		if(spi_resource == NULL)
 			return -1;
 
 		//build resource
-		memcpy(sspi->name,SSPI_RESOURCE_NAME,sizeof(SSPI_RESOURCE_NAME));
-		InitSemaphore(&sspi->semaphore);
-		sspi->node.ln_Type = NT_RESOURCE;
-		sspi->node.ln_Pri = 0;
-		sspi->node.ln_Name = sspi->name;
-		sspi->Version = 2;
-		sspi->Revision = 0;
+		memcpy(spi_resource->name,SPI_RESOURCE_NAME,sizeof(SPI_RESOURCE_NAME));
+		InitSemaphore(&spi_resource->semaphore);
+		spi_resource->node.ln_Type = NT_RESOURCE;
+		spi_resource->node.ln_Pri = 0;
+		spi_resource->node.ln_Name = spi_resource->name;
+		spi_resource->Version = 2;
+		spi_resource->Revision = 0;
 
 		//add resource to the system
-		AddResource(sspi);
+		AddResource(spi_resource);
 	}
 
 	//set pointer to spi resource
-	spi->sspi = sspi;
+	spi->resource = spi_resource;
 
 	//set pointer to SysBase
 	spi->SysBase = SysBase;
@@ -127,6 +138,9 @@ int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 
 	//initial speed is slow
 	spi->speed = SPI_SPEED_SLOW;
+
+	//initialize the controller
+	spi_wr_select_reg(0x00, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 
 	return 1;
 }
