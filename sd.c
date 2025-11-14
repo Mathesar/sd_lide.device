@@ -279,13 +279,25 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
         return sdError_Timeout;
     }
 
+#ifdef SPI_CRC_ACCELERATION_SUPPORTED
+    spi_crc_reset(spi, SPI_CRC_MODE_READ);
+#endif // SPI_CRC_ACCELERATION_SUPPORTED
+
     /* Read data */
     spi_read(spi, buf, size);
+
+#ifdef SPI_CRC_ACCELERATION_SUPPORTED
+    uint16_t crc16 = spi_crc_read(spi);
+#endif // SPI_CRC_ACCELERATION_SUPPORTED
+
+    //read crc
     spi_read(spi, crc, 2);
 
 #ifndef SD_CRC_DISABLE
     /* check CRC */
+#ifndef SPI_CRC_ACCELERATION_SUPPORTED
     uint16_t crc16 = sd_compute_crc16_fast(buf, size);
+#endif
     if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
     {
         Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);

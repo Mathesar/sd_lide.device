@@ -24,11 +24,12 @@
 //assembly functions
 extern void spi_wr_select_reg(UBYTE select asm("d0"), UBYTE *port asm("a1"));
 
-extern void spi_read_fast(UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
-extern void spi_read_slow(UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
+extern void spi_read_fast (      UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
+extern void spi_read_slow (      UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
 extern void spi_write_fast(const UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
 extern void spi_write_slow(const UBYTE *buf asm("a0"), UWORD size asm("d0"), UBYTE *port asm("a1"));
-extern void _spi_crc_rst_src(UWORD size asm("d0"), UBYTE *port asm("a1"));
+
+extern void spi_crc_rst_src(UBYTE source asm("d0"), UBYTE *port asm("a1"));
 extern UWORD spi_crc_result(UBYTE *port asm("a1"));
 
 //obtain the bus
@@ -93,6 +94,20 @@ void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm(
         spi_write_slow(buf, size, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 }
 
+//reset CRC generator and select read or write mode
+void spi_crc_reset(spi_t *spi, uint8_t mode)
+{
+    spi_crc_rst_src(mode, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
+}
+
+//read the CRC
+uint16_t spi_crc_read(spi_t *spi)
+{
+    uint16_t crc;
+    crc = spi_crc_result((UBYTE *)(SD_PLUS_BASE_ADDRESS));
+    return crc;
+}
+
 //initialize SPI hardware, <channel> sets chipselect to use
 int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 {
@@ -101,13 +116,13 @@ int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 		return -1;
 
 	//open sspi resource
-	struct spi_resource_TYPE *spi_resource = OpenResource(SPI_RESOURCE_NAME);
+	struct spi_resource_t *spi_resource = OpenResource(SPI_RESOURCE_NAME);
 
 	//create resource if it does not exist yet
 	if(spi_resource == NULL)
 	{
 		//allocate memory for resource
-		spi_resource = AllocMem(sizeof(struct spi_resource_TYPE), MEMF_PUBLIC|MEMF_CLEAR);
+		spi_resource = AllocMem(sizeof(struct spi_resource_t), MEMF_PUBLIC|MEMF_CLEAR);
 		if(spi_resource == NULL)
 			return -1;
 

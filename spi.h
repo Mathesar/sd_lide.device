@@ -22,6 +22,8 @@
 
 #include <exec/exec.h>
 
+#define SPI_CRC_ACCELERATION_SUPPORTED
+
 #define SD_PLUS_BASE_ADDRESS    0x00BFEB01
 
 #define SPI_SPEED_SLOW 		    0x00
@@ -32,10 +34,13 @@
 #define SPI_CHANNEL_2		    0x02
 #define SPI_CHANNEL_3		    0x04
 
+#define SPI_CRC_MODE_WRITE      0x00
+#define SPI_CRC_MODE_READ       0x01
+
 #define SPI_RESOURCE_NAME	    "sd-plus"
 
 //spi resource
-struct spi_resource_TYPE
+struct spi_resource_t
 {
 	struct Node	node;
 	UBYTE                       pad1;
@@ -51,7 +56,7 @@ struct spi_resource_TYPE
 //spi channel structure
 typedef struct
 {
-    struct spi_resource_TYPE    *resource;  // pointer to the SPI resource
+    struct spi_resource_t       *resource;  // pointer to the SPI resource
     struct ExecBase             *SysBase;   // pointer to Exec/SysBase
     UBYTE                       speed;      // bus speed
     UBYTE                       bus_taken;  // bus status
@@ -66,6 +71,8 @@ void spi_deselect();
 void spi_set_speed(spi_t *spi, UBYTE speed);
 void spi_read(spi_t *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"));
 void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"));
+void spi_crc_reset(spi_t *spi, uint8_t mode);
+uint16_t spi_crc_read(spi_t *spi);
 int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase);
 void spi_shutdown(spi_t *spi);
 
