@@ -95,17 +95,15 @@ void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm(
 }
 
 //reset CRC generator and select read or write mode
-void spi_crc_reset(spi_t *spi, uint8_t mode)
+void spi_crc_reset(uint8_t mode)
 {
     spi_crc_rst_src(mode, (UBYTE *)(SD_PLUS_BASE_ADDRESS));
 }
 
 //read the CRC
-uint16_t spi_crc_read(spi_t *spi)
+uint16_t spi_crc_read(void)
 {
-    uint16_t crc;
-    crc = spi_crc_result((UBYTE *)(SD_PLUS_BASE_ADDRESS));
-    return crc;
+    return( spi_crc_result((UBYTE *)(SD_PLUS_BASE_ADDRESS)) );
 }
 
 //initialize SPI hardware, <channel> sets chipselect to use

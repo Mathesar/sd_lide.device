@@ -71,8 +71,8 @@ void spi_deselect();
 void spi_set_speed(spi_t *spi, UBYTE speed);
 void spi_read(spi_t *spi asm("a1"), UBYTE *buf asm("a0"), UWORD size asm("d0"));
 void spi_write(spi_t *spi asm("a1"), const UBYTE *buf asm("a0"), UWORD size asm("d0"));
-void spi_crc_reset(spi_t *spi, uint8_t mode);
-uint16_t spi_crc_read(spi_t *spi);
+void spi_crc_reset(uint8_t mode);
+uint16_t spi_crc_read(void);
 int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase);
 void spi_shutdown(spi_t *spi);
 

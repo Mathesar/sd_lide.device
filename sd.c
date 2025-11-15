@@ -280,17 +280,19 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     }
 
 #ifdef SPI_CRC_ACCELERATION_SUPPORTED
-    spi_crc_reset(spi, SPI_CRC_MODE_READ);
+    /* reset crc generator */
+    spi_crc_reset(SPI_CRC_MODE_READ);
 #endif // SPI_CRC_ACCELERATION_SUPPORTED
 
     /* Read data */
     spi_read(spi, buf, size);
 
 #ifdef SPI_CRC_ACCELERATION_SUPPORTED
-    uint16_t crc16 = spi_crc_read(spi);
+    /* read crc generator */
+    uint16_t crc16 = spi_crc_read();
 #endif // SPI_CRC_ACCELERATION_SUPPORTED
 
-    //read crc
+    /* read crc computed by card */
     spi_read(spi, crc, 2);
 
 #ifndef SD_CRC_DISABLE
@@ -308,13 +310,16 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     return sdError_OK;
 }
 
-static int sd_write_block(spi_t *spi, const uint8_t *buf, uint16_t crc16, uint8_t token)
+static int sd_write_block(spi_t *spi, const uint8_t *buf, uint8_t token)
 {
-    uint8_t crc[2];
     uint8_t resp;
+    uint16_t crc16 = 0xFFFF;
 
-    crc[0] = (crc16>>8) & 0xff;
-    crc[1] = crc16 & 0xff;
+#ifndef SD_CRC_DISABLE
+#ifndef SPI_CRC_ACCELERATION_SUPPORTED
+    crc16 = sd_compute_crc16_fast((uint8_t *)buf, SD_SECTOR_SIZE);
+#endif // SPI_CRC_ACCELERATION_SUPPORTED
+#endif // SD_CRC_DISABLE
 
     if (sd_wait_ready(spi) < 0) {
         Warn("Card not ready\n");
@@ -324,11 +329,21 @@ static int sd_write_block(spi_t *spi, const uint8_t *buf, uint16_t crc16, uint8_
     /* Send token */
     spi_write(spi, &token, 1);
     if (token != 0xfd) {
+#ifdef SPI_CRC_ACCELERATION_SUPPORTED
+        /* reset crc generator */
+        spi_crc_reset(SPI_CRC_MODE_WRITE);
+#endif // SPI_CRC_ACCELERATION_SUPPORTED
+
         /* Send data, except for STOP_TRAN */
         spi_write(spi, buf, SD_SECTOR_SIZE);
 
+#ifdef SPI_CRC_ACCELERATION_SUPPORTED
+        /* read crc generator */
+        crc16 = spi_crc_read();
+#endif // SPI_CRC_ACCELERATION_SUPPORTED
+
         /* send CRC */
-        spi_write(spi, crc, 2);
+        spi_write(spi, (UBYTE *)&crc16, 2);
 
         /* Receive data response */
         spi_read(spi, &resp, 1);
@@ -842,8 +857,7 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
         if (count == 1) {
             /* Write single sector */
             if (sd_send_cmd(spi, CMD24, lba) == 0) {
-                uint16_t crc = sd_compute_crc16_fast((uint8_t *)buffer, SD_SECTOR_SIZE);
-                err = sd_write_block(spi, buffer, crc, 0xfe);
+                err = sd_write_block(spi, buffer, 0xfe);
                 if(err == sdError_OK) {
                     err = sd_check_r2_resp(spi);
                     if(err == sdError_OK) {
@@ -860,8 +874,7 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
             void *block_buffer = buffer;
             if (sd_send_cmd(spi, CMD25, lba) == 0) {
                 do {
-                    uint16_t crc = sd_compute_crc16_fast((uint8_t *)block_buffer, SD_SECTOR_SIZE);
-                    err = sd_write_block(spi, block_buffer, crc, 0xfc);
+                    err = sd_write_block(spi, block_buffer, 0xfc);
                     if (err != sdError_OK) {
                         /* when we get an error here it is often due to a spurious (extra) clock cycle
                         therefore we wiggle CS to re-align before sending STOP_TRAN token*/
@@ -874,7 +887,7 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
                 } while (--block_count);
 
                 /* always send send STOP_TRAN token */
-                sd_write_block(spi, NULL, 0, 0xfd);
+                sd_write_block(spi, 0, 0xfd);
 
                 if(err == sdError_OK) {
                     err = sd_check_r2_resp(spi);
@@ -991,8 +1004,6 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
     sd_card_info_t *ci = &unit->sd_card_info;
     spi_t *spi = &unit->sd_card_info.spi;
     int16_t retries = MAX_READ_WRITE_RETRIES;
-    uint16_t crc = 0xffff;
-    uint16_t crc_next = 0xffff;
     int err = sdError_OK;
 
     if (ci->type == sdCardType_None) {
@@ -1007,9 +1018,6 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
         Warn("CRC not enabled\n");
         return IOERR_ABORTED;
     }
-
-    /* compute crc of first block */
-    crc = sd_compute_crc16_fast((uint8_t *)buffer, SD_SECTOR_SIZE);
 #endif // SD_CRC_DISABLE
 
     do {
@@ -1022,16 +1030,8 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
 
         /* Write single sector */
         if (sd_send_cmd(spi, CMD24, sd_address) == 0) {
-            err = sd_write_block(spi, buffer, crc, 0xfe);
+            err = sd_write_block(spi, buffer, 0xfe);
             if(err == sdError_OK) {
-#ifndef SD_CRC_DISABLE
-                if(count > 1) {
-                    /* release card so that card starts programming block */
-                    sd_deselect(spi);
-                    /* and compute crc of next block while card is busy */
-                    crc_next = sd_compute_crc16_fast((uint8_t *)(buffer+SD_SECTOR_SIZE), SD_SECTOR_SIZE);
-                }
-#endif // SD_CRC_DISABLE
                 err = sd_check_r2_resp(spi);
                 if(err == sdError_OK) {
                     /* block written successfully */
@@ -1042,7 +1042,6 @@ BYTE ata_write(void *buffer, ULONG lba, ULONG count, struct IDEUnit *unit)
                     }
                     lba++;
                     buffer += SD_SECTOR_SIZE;
-                    crc = crc_next;
                     continue;
                 }
             }
