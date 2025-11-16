@@ -110,7 +110,7 @@ uint16_t spi_crc_read(void)
 int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 {
 	//assert channel
-	if(channel!=SPI_CHANNEL_1 && channel!=SPI_CHANNEL_2 && channel!=SPI_CHANNEL_3)
+	if(channel >= SPI_N_TOTAL_CHANNELS)
 		return -1;
 
 	//open sspi resource
@@ -144,7 +144,7 @@ int spi_initialize(spi_t *spi, unsigned char channel, struct ExecBase *SysBase)
 	spi->SysBase = SysBase;
 
 	//set channel to use
-	spi->channel = channel;
+	spi->channel = ((const uint8_t)1<<channel);
 
 	//we do not have the bus
 	spi->bus_taken = 0;

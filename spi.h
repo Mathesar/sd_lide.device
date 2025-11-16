@@ -22,21 +22,32 @@
 
 #include <exec/exec.h>
 
+// This controller supports hardware accelerated CRC16 computations
 #define SPI_CRC_ACCELERATION_SUPPORTED
 
+// This is the base address of the a500-sd-plus controller
 #define SD_PLUS_BASE_ADDRESS    0x00BFEB01
 
+// SPI speed definitions
 #define SPI_SPEED_SLOW 		    0x00
 #define SPI_SPEED_MEDIUM        0x01
 #define SPI_SPEED_FAST 		    0x02
 
-#define SPI_CHANNEL_1		    0x01
-#define SPI_CHANNEL_2		    0x02
-#define SPI_CHANNEL_3		    0x04
+// Chip select "channels"
+#define SPI_CHANNEL_SD		    0
+#define SPI_CHANNEL_ETHERNET    2
 
+// Number of SD cards supported
+#define SPI_N_SD_CHANNELS       2
+
+// Total number of chip select "channels"
+#define SPI_N_TOTAL_CHANNELS    3
+
+// Set direction of accelerated CRC16 computations
 #define SPI_CRC_MODE_WRITE      0x00
 #define SPI_CRC_MODE_READ       0x01
 
+// The name of the a500-sd-plus resource
 #define SPI_RESOURCE_NAME	    "sd-plus"
 
 //spi resource

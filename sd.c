@@ -25,6 +25,7 @@
  *  02-05-2025      (DvW) refactoring to be used with lide.device
  *  19-05-2025      (DvW) added optional CRC checking
  *  17-06-2025      (DvW) added error recovery mechanism for read, also added single block read function
+ *  16-11-2025      (DvW) added support for a500-sd-plus controller
  */
 
 #include <devices/scsidisk.h>
@@ -288,7 +289,6 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     spi_read(spi, buf, size);
 
 #ifdef SPI_CRC_ACCELERATION_SUPPORTED
-    /* read crc generator */
     uint16_t crc16 = spi_crc_read();
 #endif // SPI_CRC_ACCELERATION_SUPPORTED
 
@@ -296,15 +296,18 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
     spi_read(spi, crc, 2);
 
 #ifndef SD_CRC_DISABLE
-    /* check CRC */
+
 #ifndef SPI_CRC_ACCELERATION_SUPPORTED
     uint16_t crc16 = sd_compute_crc16_fast(buf, size);
 #endif
+
+    /* check CRC */
     if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
     {
         Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);
         return sdError_CRC;
     }
+
 #endif // SD_CRC_DISABLE
 
     return sdError_OK;
@@ -522,7 +525,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     unit->atapi             = false;
     unit->deviceType        = 0;
 
-    if(unit->unitNum > 0)
+    if(unit->unitNum >= SPI_N_SD_CHANNELS)
     {
         /* unit number not supported */
         Warn("unit not supported\n");
@@ -530,7 +533,7 @@ bool ata_init_unit(struct IDEUnit *unit)
     }
 
     /* initialize SPI interface */
-    if(spi_initialize(spi, SPI_CHANNEL_1, unit->SysBase) != 1)
+    if(spi_initialize(spi, SPI_CHANNEL_SD+unit->unitNum, unit->SysBase) != 1)
         return false;
 
     spi_set_speed(spi, SPI_SPEED_SLOW);
