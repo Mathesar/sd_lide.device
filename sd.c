@@ -268,7 +268,8 @@ static void sd_send_idle_bytes(spi_t *spi, uint16_t n_bytes)
 static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
 {
 	TIMER timeout;
-    uint8_t token, crc[2];
+    uint8_t token;
+    uint16_t crc;
 
     /* Wait for data start token */
 	timeout = timer_set( TIMER_MILLIS(READY_TIMEOUT_MS) );
@@ -292,7 +293,7 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
 #endif // SPI_CRC_ACCELERATION_SUPPORTED
 
     /* read crc computed by card */
-    spi_read(spi, crc, 2);
+    spi_read(spi, (UBYTE *)&crc, 2);
 
 #ifndef SD_CRC_DISABLE
 
@@ -301,9 +302,9 @@ static int sd_read_block(spi_t *spi, uint8_t *buf, unsigned int size)
 #endif
 
     /* check CRC */
-    if( (crc[1]!=(crc16&0xff)) || (crc[0]!=((crc16>>8)&0xff)) )
+    if( crc != crc16 )
     {
-        Warn("CRC16 error on read: %04X/%02X%02X\n", (unsigned long)crc16, (unsigned long)crc[0], (unsigned long)crc[1]);
+        Warn("CRC16 error on read: 0x%04X/0x%04X\n", (unsigned long)crc16, (unsigned long)crc);
         return sdError_CRC;
     }
 
