@@ -95,10 +95,10 @@ AIDE-$(PROJECT): $(SRCS)
 	${CC} -o $@ $(CFLAGS) -DCDBOOT=1 -DSIMPLE_IDE=1 $(SRCS) bootblock.S $(LDFLAGS)
 
 SD-$(PROJECT): $(SRCS)
-	${CC} -o $@ $(CFLAGS) -DSD_DRIVER=1 device.c sd.c sd_crc.S scsi.c idetask.c lide_alib.c mounter.c debug.c timer.c spi.c spi_low.S endskip.S bootblock.S $(LDFLAGS)
+	${CC} -o $@ $(CFLAGS) -DSD_DRIVER -DSD_MULTIBLOCK_ENABLE device.c sd.c sd_crc7.S scsi.c idetask.c lide_alib.c mounter.c debug.c timer.c spi.c spi_low.S endskip.S bootblock.S $(LDFLAGS)
 
 SD_Test: $(SRCS)
-	${CC} -o $@ -DDEBUG=23 -DSD_DRIVER=1 sd_test.c timer.c sd.c sd_crc_slow.c sd_crc.S spi.c spi_low.S
+	${CC} -o $@ -DDEBUG=23 -DSD_DRIVER -DSD_MULTIBLOCK_ENABLE -Os -Wa,-adhln sd_test.c timer.c sd.c sd_crc_slow.c sd_crc7.S sd_crc16.S spi.c spi_low.S > sd_test.lst
 
 lideflash/lideflash:
 	make -C lideflash
