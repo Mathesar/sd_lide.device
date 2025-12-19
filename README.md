@@ -31,6 +31,8 @@ These features are:
 This branch of the sd-lide.device supports the following device:
 * [a500-sd-plus-controller](https://github.com/Mathesar/a500-sd-plus-controller)
 
+(For the [a500-simple-spi-hardware](https://github.com/Mathesar/a500-simple-spi-hardware) version see  [this branch](https://github.com/Mathesar/sd_lide.device/tree/a500-simple-spi)).
+
 This driver needs to be loaded from floppy using [loadmodule](https://aminet.net/package/util/boot/LoadModule). Alternatively, it can be "burned" to a custom Kickstart ROM. This is my preferred way of using this driver.
 The driver is small enough that it fits in standard 512Kb 3.1 ROM when scsi.device, card.resource and carddisk.device are removed. These modules are not used anyway on an A500.
 
